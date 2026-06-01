@@ -1,0 +1,15 @@
+# Editor directories and tools
+.vscode/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Project data and generated files
+dataloader/data/
+*.glb
+*.png
+
+# wandb logs
+wandb

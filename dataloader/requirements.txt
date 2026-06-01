@@ -1,0 +1,18 @@
+# === Data Sourcing ===
+objaverse
+
+# === 3D Processing & Rendering ===
+open3d
+pyrender
+
+# === Computer Vision & Math ===
+opencv-python
+numpy
+Pillow
+
+# === Plotting & Testing ===
+matplotlib
+
+# === Deep Learning (Phase 1 & 2) ===
+torch
+torchvision
