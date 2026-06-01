@@ -1,3 +1,23 @@
+# Cloning the Repository
+
+Clone the repository
+
+```bash
+
+git clone git@gitlab.lrz.de:sketch2mesh_gen/sketch2mesh.git
+
+```
+
+Clone the submodules
+
+
+```bash
+
+git submodule update --init --recursive
+
+```
+
+
 # 🖼️ Sketch-to-3D Dataset Generation Pipeline
 
 This repository contains an automated, end-to-end pipeline for generating paired `{sketch, image, 3D mesh}` datasets. It leverages the **Objaverse** dataset for high-quality ground-truth 3D topologies, utilizes **Open3D** for headless multi-view rendering, and extracts stylized wireframes via **OpenCV**.
