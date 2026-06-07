@@ -147,15 +147,17 @@ def main():
         gt_sparse_tensor = SparseTensor(feats=feats, coords=coords_with_batch)
         
         # Run through the structural mesh decoder module
+        # Run through the structural mesh decoder module
         decoder_model = base_pipe.models['slat_decoder_mesh']
         gt_mesh_result = decoder_model(gt_sparse_tensor)
         
-        # MeshExtractResult holds inner components. Extract them using the correct attribute
         gt_mesh = gt_mesh_result[0] if isinstance(gt_mesh_result, list) else gt_mesh_result
         if hasattr(gt_mesh, "to_trimesh"):
             gt_mesh = gt_mesh.to_trimesh()
         elif hasattr(gt_mesh, "mesh"):
             gt_mesh = gt_mesh.mesh
+        elif hasattr(gt_mesh, "fancy"): # Check for other TRELLIS specific attributes if present
+            gt_mesh = gt_mesh.fancy
             
         gt_mesh.export(os.path.join(args.output_dir, "1_ground_truth.glb"))
         
@@ -171,9 +173,14 @@ def main():
         base_coords = base_pipe.sample_sparse_structure(cond=base_cond_dict, num_samples=1)
         base_slat = base_pipe.sample_slat(cond=base_cond_dict, coords=base_coords)
         base_decoded = base_pipe.decode_slat(base_slat, formats=['mesh'])
-        
+
+
         base_mesh = base_decoded['mesh'][0] if isinstance(base_decoded['mesh'], list) else base_decoded['mesh']
-        if hasattr(base_mesh, "to_trimesh"): base_mesh = base_mesh.to_trimesh()
+        if hasattr(base_mesh, "to_trimesh"):
+            base_mesh = base_mesh.to_trimesh()
+        elif hasattr(base_mesh, "mesh"):
+            base_mesh = base_mesh.mesh
+            
         base_mesh.export(os.path.join(args.output_dir, "2_base_model_pretrain.glb"))
         
     # -------------------------------------------------------------
@@ -186,7 +193,11 @@ def main():
         ft_decoded = ft_pipe.decode_slat(ft_slat, formats=['mesh'])
         
         ft_mesh = ft_decoded['mesh'][0] if isinstance(ft_decoded['mesh'], list) else ft_decoded['mesh']
-        if hasattr(ft_mesh, "to_trimesh"): ft_mesh = ft_mesh.to_trimesh()
+        if hasattr(ft_mesh, "to_trimesh"):
+            ft_mesh = ft_mesh.to_trimesh()
+        elif hasattr(ft_mesh, "mesh"):
+            ft_mesh = ft_mesh.mesh
+            
         ft_mesh.export(os.path.join(args.output_dir, "3_finetuned_checkpoint.glb"))
         
     print(f"\nDiagnostic execution complete! Open the files in '{args.output_dir}' using any 3D viewer.")
