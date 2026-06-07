@@ -20,14 +20,15 @@ python diagnose.py --checkpoint ./checkpoints/trellis_lora_epoch_300
 """
 
 import os
-# os.environ['ATTN_BACKEND'] = 'xformers' 
-# os.environ['SPCONV_ALGO'] = 'native'
+os.environ['ATTN_BACKEND'] = 'xformers' 
+os.environ['SPCONV_ALGO'] = 'native'
 
 import argparse
 import torch
 from peft import PeftModel
 from TRELLIS.trellis.pipelines import TrellisImageTo3DPipeline
 from dataloader.dataset import SketchMeshDataset
+import trimesh
 # Import the custom SparseTensor class that the model signature explicitly hunts for
 from TRELLIS.trellis.modules.sparse.basic import SparseTensor
 from config import TRAINING_CONFIG
@@ -119,49 +120,45 @@ def main():
     gt_slat_dense = batch['ss_latent'].to(device) # Shape: [8, 16, 16, 16] or similar dense structure
     
     # -------------------------------------------------------------
-    # VISUAL 1: Ground Truth (Converted to SparseTensor to pass validation signature)
+    # VISUAL 1: Ground Truth (Dense to Sparse Conversion)
     # -------------------------------------------------------------
     print("\n[Visual 1/3] Converting and Decoding Ground Truth Latent...")
     with torch.no_grad():
-        # Find where non-zero structural properties live in your dense latent vector
-        # This builds coordinates from spatial values where structural presence > 0
+        # Handle optional batch dimension from dataset sample safely
         if gt_slat_dense.ndim == 5:  # [B, C, X, Y, Z]
             gt_slat_dense = gt_slat_dense[0]
             
-        # Sum across channels to identify layout coordinates
+        # 🚨 FIX: Find coordinates where features are active to build the sparse network layout
         occupancy_mask = torch.sum(torch.abs(gt_slat_dense), dim=0) > 0.0
-        coords = torch.argwhere(occupancy_mask).int() # Yields [N, 3] layout coordinates
+        coords = torch.argwhere(occupancy_mask).int() # Generates structural [N, 3] layout coordinates
         
         if coords.shape[0] == 0:
             print("WARNING: Ground truth spatial data appears empty! Using fallback mock coordinates.")
             coords = torch.argwhere(torch.ones_like(occupancy_mask)).int()
 
-        # Add batch index 0 column to convert coordinates from [N, 3] to [N, 4] format
+        # Add batch index 0 column to convert layout from [N, 3] to [N, 4] format for spconv compliance
         batch_indices = torch.zeros(coords.shape[0], 1, dtype=torch.int32, device=device)
         coords_with_batch = torch.cat([batch_indices, coords], dim=1)
         
-        # Extract features corresponding directly to those sparse coordinate layouts
+        # Isolate and harvest structural features corresponding directly to those discovered coordinates
         feats = gt_slat_dense[:, coords[:, 0], coords[:, 1], coords[:, 2]].permute(1, 0)
         
-        # Package into standard TRELLIS SparseTensor
+        # Wrap everything into a valid SparseTensor instance to appease the forward signature validation
         gt_sparse_tensor = SparseTensor(feats=feats, coords=coords_with_batch)
         
-        # Run through the structural mesh decoder module
-        # Run through the structural mesh decoder module
+        # Run through the structural mesh decoder module safely
         decoder_model = base_pipe.models['slat_decoder_mesh']
         gt_mesh_result = decoder_model(gt_sparse_tensor)
         
-        gt_mesh = gt_mesh_result[0] if isinstance(gt_mesh_result, list) else gt_mesh_result
-        if hasattr(gt_mesh, "to_trimesh"):
-            gt_mesh = gt_mesh.to_trimesh()
-        elif hasattr(gt_mesh, "mesh"):
-            gt_mesh = gt_mesh.mesh
-        elif hasattr(gt_mesh, "fancy"): # Check for other TRELLIS specific attributes if present
-            gt_mesh = gt_mesh.fancy
-            
+        # Unpack the native MeshExtractResult wrapper properties
+        gt_mesh_data = gt_mesh_result[0] if isinstance(gt_mesh_result, list) else gt_mesh_result
+        v = gt_mesh_data.vertices.detach().cpu().numpy()
+        f = gt_mesh_data.faces.detach().cpu().numpy()
+        
+        gt_mesh = trimesh.Trimesh(vertices=v, faces=f)
         gt_mesh.export(os.path.join(args.output_dir, "1_ground_truth.glb"))
         
-    # Process sketch images into core dictionary inputs format
+    # Process sketch images into core pipeline input formats
     base_cond_dict = extract_conditioning(base_pipe, sketch_tensor, device)
     ft_cond_dict = extract_conditioning(ft_pipe, sketch_tensor, device)
     
@@ -173,14 +170,12 @@ def main():
         base_coords = base_pipe.sample_sparse_structure(cond=base_cond_dict, num_samples=1)
         base_slat = base_pipe.sample_slat(cond=base_cond_dict, coords=base_coords)
         base_decoded = base_pipe.decode_slat(base_slat, formats=['mesh'])
-
-
-        base_mesh = base_decoded['mesh'][0] if isinstance(base_decoded['mesh'], list) else base_decoded['mesh']
-        if hasattr(base_mesh, "to_trimesh"):
-            base_mesh = base_mesh.to_trimesh()
-        elif hasattr(base_mesh, "mesh"):
-            base_mesh = base_mesh.mesh
-            
+        
+        base_mesh_data = base_decoded['mesh'][0] if isinstance(base_decoded['mesh'], list) else base_decoded['mesh']
+        bv = base_mesh_data.vertices.detach().cpu().numpy()
+        bf = base_mesh_data.faces.detach().cpu().numpy()
+        
+        base_mesh = trimesh.Trimesh(vertices=bv, faces=bf)
         base_mesh.export(os.path.join(args.output_dir, "2_base_model_pretrain.glb"))
         
     # -------------------------------------------------------------
@@ -192,12 +187,11 @@ def main():
         ft_slat = ft_pipe.sample_slat(cond=ft_cond_dict, coords=ft_coords)
         ft_decoded = ft_pipe.decode_slat(ft_slat, formats=['mesh'])
         
-        ft_mesh = ft_decoded['mesh'][0] if isinstance(ft_decoded['mesh'], list) else ft_decoded['mesh']
-        if hasattr(ft_mesh, "to_trimesh"):
-            ft_mesh = ft_mesh.to_trimesh()
-        elif hasattr(ft_mesh, "mesh"):
-            ft_mesh = ft_mesh.mesh
-            
+        ft_mesh_data = ft_decoded['mesh'][0] if isinstance(ft_decoded['mesh'], list) else ft_decoded['mesh']
+        fv = ft_mesh_data.vertices.detach().cpu().numpy()
+        ff = ft_mesh_data.faces.detach().cpu().numpy()
+        
+        ft_mesh = trimesh.Trimesh(vertices=fv, faces=ff)
         ft_mesh.export(os.path.join(args.output_dir, "3_finetuned_checkpoint.glb"))
         
     print(f"\nDiagnostic execution complete! Open the files in '{args.output_dir}' using any 3D viewer.")
