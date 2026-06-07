@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 from TRELLIS.trellis.pipelines import TrellisImageTo3DPipeline
 from peft import LoraConfig, get_peft_model
+from config import TRAINING_CONFIG
 
 # =====================================================================
 # THE STRUCTURAL ENGINE WRAPPER
@@ -32,10 +33,10 @@ class TrellisSketchTrainingArchitecture(nn.Module):
         # -------------------------------------------------------------
         print("Configuring and applying PEFT LoRA wrapper...")
         lora_config = LoraConfig(
-            r=16,                # Low-rank dimension for 24GB VRAM target
-            lora_alpha=32,       # Scaling factor
-            target_modules=["to_q", "to_kv", "to_qkv", "to_out"], # Targeted attention blocks
-            lora_dropout=0.05,
+            r=TRAINING_CONFIG["lora_r"],                # Low-rank dimension for 24GB VRAM target
+            lora_alpha=TRAINING_CONFIG["lora_alpha"],       # Scaling factor
+            target_modules=TRAINING_CONFIG["target_modules"], # Targeted attention blocks
+            lora_dropout=TRAINING_CONFIG["lora_dropout"],
             bias="none"
         )
         print("Applying the PEFT wrapper to the frozen model...")
@@ -43,7 +44,10 @@ class TrellisSketchTrainingArchitecture(nn.Module):
         
         # -------------------------------------------------------------
         # STEP 3: EXTRACT & FREEZE IMAGE CONDITIONING ENCODER
-        # -------------------------------------------------------------
+        # -------------------------------------------------------------\
+        self.register_buffer("slat_mean", torch.tensor(pipeline.slat_normalization['mean']).view(1, 8, 1, 1, 1))
+        self.register_buffer("slat_std", torch.tensor(pipeline.slat_normalization['std']).view(1, 8, 1, 1, 1))
+
         print("Extracting and locking 'image_cond_model' for sketch features...")
         self.cond_encoder = pipeline.models['image_cond_model']
         # Freeze 100% of Microsoft's original weights
@@ -53,49 +57,20 @@ class TrellisSketchTrainingArchitecture(nn.Module):
 
     def get_sketch_tokens(self, sketch_tensor):
         """
-        Feature Extraction: Converts raw sketch pixels into 
-        mathematical conditioning tokens without tracking memory gradients.
+        Correctly extracts and concatenates DINOv2 visual tokens for TRELLIS.
         """
         with torch.no_grad():
-            # Pass preprocessed sketch pixels through the frozen encoder
-            cond_output = self.cond_encoder(sketch_tensor)
+            # CRITICAL FIX: is_training=True forces DINOv2 to return the dictionary
+            # of patch tokens instead of just the classification tensor!
+            features = self.cond_encoder(sketch_tensor, is_training=True)
             
-            # Handle potential dictionary formatting vs raw tensor output
-            if isinstance(cond_output, dict):
-                cond_tokens = cond_output.get("cond_tokens")
-            else:
-                cond_tokens = cond_output
-
-        # --- DIAGNOSTIC PRINT (Temporary: Helps us see what cond_encoder actually outputs) ---
-        # print(f"[DEBUG] Raw encoder output shape: {cond_tokens.shape}")
-
-        # Ensure we have a 3D tensor: [Batch, Sequence_Length, Feature_Channels]
-        if cond_tokens.ndim == 2:
-            # If [Batch, Channels], unsqueeze to [Batch, 1, Channels]
-            cond_tokens = cond_tokens.unsqueeze(1)
+            # Now 'features' is correctly a dictionary!
+            cls_token = features['x_norm_clstoken'].unsqueeze(1) # [B, 1, C]
+            patch_tokens = features['x_norm_patchtokens']        # [B, N, C]
             
-        # Target sequence length that TRELLIS cross-attention is hunting for
-        target_seq_len = 1024
-        current_seq_len = cond_tokens.shape[1]
-        
-        if current_seq_len != target_seq_len:
-            if current_seq_len == 1:
-                # If sequence length is 1, repeat it along the sequence dimension cleanly
-                cond_tokens = cond_tokens.repeat(1, target_seq_len, 1)
-            else:
-                # If it's another arbitrary sequence length, interpolate or pad it
-                # Permute to [Batch, Channels, Seq] for 1D interpolation
-                cond_tokens = cond_tokens.permute(0, 2, 1)
-                cond_tokens = torch.nn.functional.interpolate(
-                    cond_tokens, size=target_seq_len, mode='linear', align_corners=False
-                )
-                cond_tokens = cond_tokens.permute(0, 2, 1) # Permute back to [Batch, Seq, Channels]
-
-        # --- THE INSURANCE POLICY ---
-        # If the channel dimension doesn't match what the DiT cross-attention linear layer expects,
-        # we need to ensure it projects correctly. If it still crashes, we will see the exact shape here:
-        # print(f"[DEBUG] Final processed conditioning shape entering DiT: {cond_tokens.shape}")
-
+            # Concatenate along the sequence dimension to get [B, N+1, C]
+            cond_tokens = torch.cat([cls_token, patch_tokens], dim=1)
+            
         return cond_tokens
 
     def forward(self, x_t, t, sketch_tensor):
@@ -122,7 +97,7 @@ def setup_trainable_structure_pipeline():
 
     print("Initializing TRELLIS Master Pipeline...")
     # Pulls the heavy structural and conditioning assets from weights
-    pipeline = TrellisImageTo3DPipeline.from_pretrained("microsoft/TRELLIS-image-large")
+    pipeline = TrellisImageTo3DPipeline.from_pretrained(TRAINING_CONFIG["model_backbone"])
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
     print("\nConstructing Training Architecture Wrapper...")

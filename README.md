@@ -10,13 +10,11 @@ git clone git@gitlab.lrz.de:sketch2mesh_gen/sketch2mesh.git
 
 Clone the submodules
 
-
 ```bash
 
 git submodule update --init --recursive
 
 ```
-
 
 # 🖼️ Sketch-to-3D Dataset Generation Pipeline
 
@@ -95,7 +93,7 @@ data/
 Once your data is generated, you can seamlessly stream it into your training loops using the included `SketchMeshDataset` class. It features lazy-loading to prevent out-of-memory errors and automatic sanity checks to ensure paired data integrity.
 
 ```python
-from dataset import SketchMeshDataset
+from dataloader.dataset import SketchMeshDataset
 from torch.utils.data import DataLoader
 
 # 1. Initialize the Dataset
@@ -147,7 +145,6 @@ Run:
 ```bash
 python generate_slats.py --data_dir dataloader/data/chair
 ```
-
 
 # Sketch/Image to 3D Evaluation Pipeline
 

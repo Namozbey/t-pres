@@ -33,64 +33,55 @@ def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch):
 
     
     for batch_idx, batch in enumerate(dataloader):
-
         optimizer.zero_grad()
 
-        # -------------------------------------------------------------
-        # 1. LOAD DATA
-        # -------------------------------------------------------------
-        # Ground-truth structured latent
-        x_0_dense = batch['ss_latent'].to(device)
-
-        # Conditioning sketch
+        # 1. LOAD & NORMALIZE DATA
+        # raw_ss_latent is [B, 8, 16, 16, 16][cite: 1, 2]
+        raw_ss_latent = batch['ss_latent'].to(device)
         sketches = batch['sketch'].to(device)
 
-        batch_size = sketches.shape[0]
+        # Apply the registered normalization buffers from architecture.py
+        x_1_data = (raw_ss_latent - model_wrapper.slat_mean) / model_wrapper.slat_std
 
-        # -------------------------------------------------------------
-        # 2. SAMPLE TIMESTEPS
-        # -------------------------------------------------------------
-        t_per_batch_item = torch.rand(batch_size, device=device)
+        if TRAINING_CONFIG["hardcode_timestep"]:
+            # -------------------------------------------------------------
+            # 2 & 3. DETERMINISTIC FLOW MATCHING (STRICT OVERFIT TEST)
+            # -------------------------------------------------------------
+            batch_size = x_1_data.shape[0]
+            
+            # FREEZE TIME: Hardcode the timestep to exactly the halfway point
+            t = torch.ones(batch_size, device=device) * 0.5 
+            
+            # FREEZE NOISE: Use a manual seed so the noise is identical every epoch
+            generator = torch.Generator(device=device).manual_seed(42)
+            epsilon_noise = torch.randn(x_1_data.size(), generator=generator, device=device)
+            
+            t_broadcast = t.view(batch_size, 1, 1, 1, 1)
 
-        # Broadcast for volumetric latent operations
-        t_broadcast = t_per_batch_item.view(
-            batch_size, 1, 1, 1, 1
-        )
+            # Linear interpolation: t=0 is noise, t=1 is data
+            x_t = (t_broadcast * x_1_data) + ((1.0 - t_broadcast) * epsilon_noise)
+            x_t.requires_grad_(True)
+        else:
+            # 2. SAMPLE NOISE AND TIMESTEPS
+            batch_size = x_1_data.shape[0]
+            t = torch.rand(batch_size, device=device) # Sample t in [0, 1]
+            epsilon_noise = torch.randn_like(x_1_data) # This is x_0
 
-        # -------------------------------------------------------------
-        # 3. SAMPLE NOISE
-        # -------------------------------------------------------------
-        epsilon = torch.randn_like(x_0_dense)
+            t_broadcast = t.view(batch_size, 1, 1, 1, 1)
 
-        # -------------------------------------------------------------
-        # 4. CONDITIONAL FLOW MATCHING INTERPOLATION
-        # -------------------------------------------------------------
-        # x(t) = (1 - t)x0 + t*epsilon
-        x_t_dense = (
-            (1.0 - t_broadcast) * x_0_dense +
-            t_broadcast * epsilon
-        )
+            # 3. FLOW MATCHING INTERPOLATION (Rectified Flow)
+            # Linear interpolation: t=0 is noise, t=1 is data
+            x_t = (t_broadcast * x_1_data) + ((1.0 - t_broadcast) * epsilon_noise)
+            x_t.requires_grad_(True)
+        
+        # 4. PREDICTION
+        # Scale t to [0, 1000] for the model's TimestepEmbedder[cite: 5]
+        predicted_velocity = model_wrapper(x_t, t * 1000.0, sketches)
 
-        # Target vector field
-        # v = epsilon - x0
-        target_velocity_dense = epsilon - x_0_dense
-
-        # -------------------------------------------------------------
-        # 5. MODEL PREDICTION
-        # -------------------------------------------------------------
-        predicted_velocity = model_wrapper(
-            x_t_dense,
-            t_per_batch_item,
-            sketches
-        )
-
-        # -------------------------------------------------------------
-        # 6. FLOW MATCHING LOSS
-        # -------------------------------------------------------------
-        loss = F.mse_loss(
-            predicted_velocity,
-            target_velocity_dense
-        )
+        # 5. LOSS
+        # The target is the direction pointing from noise (x_0) to data (x_1)
+        target_velocity = x_1_data - epsilon_noise
+        loss = F.mse_loss(predicted_velocity, target_velocity)
 
         loss.backward()
         optimizer.step()
