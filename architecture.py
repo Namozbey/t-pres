@@ -57,21 +57,26 @@ class TrellisSketchTrainingArchitecture(nn.Module):
 
     def get_sketch_tokens(self, sketch_tensor):
         """
-        Correctly extracts and concatenates DINOv2 visual tokens for TRELLIS.
+        Extracts DINOv2 visual tokens from batched training tensors 
+        and pads them to exactly 1374 length to match native TRELLIS shapes.
         """
-        with torch.no_grad():
-            # CRITICAL FIX: is_training=True forces DINOv2 to return the dictionary
-            # of patch tokens instead of just the classification tensor!
-            features = self.cond_encoder(sketch_tensor, is_training=True)
-            
-            # Now 'features' is correctly a dictionary!
-            cls_token = features['x_norm_clstoken'].unsqueeze(1) # [B, 1, C]
-            patch_tokens = features['x_norm_patchtokens']        # [B, N, C]
-            
-            # Concatenate along the sequence dimension to get [B, N+1, C]
-            cond_tokens = torch.cat([cls_token, patch_tokens], dim=1)
-            
-        return cond_tokens
+        # 1. Extract the base 1370 tokens from your training batch tensor
+        # (This matches your training loop setup)
+        features = self.cond_encoder(sketch_tensor, is_training=True)
+        cls_token = features['x_norm_clstoken'].unsqueeze(1) # [B, 1, C]
+        patch_tokens = features['x_norm_patchtokens']        # [B, N, C]
+        cond_tokens = torch.cat([cls_token, patch_tokens], dim=1) # Shape: [B, 1370, C]
+        
+        # 2. Add the 4 empty structural tokens used by the native pipeline
+        # This matches the 1374 shape from the sanity check perfectly!
+        padding_tokens = torch.zeros(
+            (cond_tokens.shape[0], 4, cond_tokens.shape[2]), 
+            dtype=cond_tokens.dtype, 
+            device=cond_tokens.device
+        )
+        aligned_tokens = torch.cat([cond_tokens, padding_tokens], dim=1) # Perfect [B, 1374, C]
+        
+        return aligned_tokens
 
     def forward(self, x_t, t, sketch_tensor):
         """

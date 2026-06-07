@@ -21,7 +21,7 @@ TRAINING_CONFIG = {
     "num_workers": 1,
 
     # Optimization Hyperparameters
-    "epochs": 10,
+    "epochs": 100,
     "learning_rate": 1e-4,
     "weight_decay": 0.0,
 

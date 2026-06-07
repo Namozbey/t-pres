@@ -12,6 +12,9 @@ dataloader/data/
 *.glb
 *.png
 checkpoints
+diagnostic_visuals
+diagnostic_outputs
+diagnostic_outputs2
 
 # wandb logs
 wandb
