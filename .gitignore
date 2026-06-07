@@ -1,5 +1,6 @@
 # Editor directories and tools
 .vscode/
+blender-portable
 
 # Python cache files
 __pycache__/
@@ -10,6 +11,7 @@ __pycache__/
 dataloader/data/
 *.glb
 *.png
+checkpoints
 
 # wandb logs
 wandb
