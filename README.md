@@ -117,8 +117,11 @@ for batch_idx, batch in enumerate(dataloader):
     # Tensors formatted as [batch_size, channels, height, width]
     images = batch['image']       # -> Shape: [8, 3, 512, 512]
     sketches = batch['sketch']    # -> Shape: [8, 3, 512, 512]
-    latent_feats = batch['latent_feats']  # -> Shape: [tokens_num, 8]
-    latent_coords = batch['latent_coords']  # -> Shape: [tokens_num, 4]
+    print(f" - Images shape:  {batch['image'].shape}")   # Expected: [B, 3, 512, 512]
+    print(f" - Sketches shape:{batch['sketch'].shape}")  # Expected: [B, 3, 512, 512]
+    print(f" - latent_feats shape:{batch['latent_feats'].shape}")  # Expected: [tokens_length, 8]
+    print(f" - latent_coords shape:{batch['latent_coords'].shape}")  # Expected: [tokens_length, 4]
+    print(f" - ss_latents shape:{batch['ss_latent'].shape}")  # Expected: [B, 8, 16, 16, 16]
 
     # Metadata for evaluation/tracking
     uids = batch['uid']           # List of 3D object IDs
