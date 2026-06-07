@@ -20,6 +20,9 @@ python diagnose.py --checkpoint ./checkpoints/trellis_lora_epoch_300
 """
 
 import os
+# os.environ['ATTN_BACKEND'] = 'xformers' 
+# os.environ['SPCONV_ALGO'] = 'native'
+
 import argparse
 import torch
 from peft import PeftModel
@@ -27,6 +30,7 @@ from TRELLIS.trellis.pipelines import TrellisImageTo3DPipeline
 from dataloader.dataset import SketchMeshDataset
 # Import the custom SparseTensor class that the model signature explicitly hunts for
 from TRELLIS.trellis.modules.sparse.basic import SparseTensor
+from config import TRAINING_CONFIG
 
 def load_diagnostic_pipeline(base_model_path: str, lora_checkpoint_path: str, device: str):
     """
@@ -104,11 +108,10 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     
     # 1. Load pipelines safely
-    base_pipe, ft_pipe = load_diagnostic_pipeline("microsoft/TRELLIS-image-large", args.checkpoint, device)
+    base_pipe, ft_pipe = load_diagnostic_pipeline(TRAINING_CONFIG["model_backbone"], args.checkpoint, device)
     
     # 2. Grab index 0 sample from your hard drive data layers
     print("\nExtracting a single sample from data layers...")
-    from config import TRAINING_CONFIG
     dataset = SketchMeshDataset(root_dir=TRAINING_CONFIG["data_root"], category=TRAINING_CONFIG["category"], image_size=TRAINING_CONFIG["image_size"])
     
     batch = dataset[0]
