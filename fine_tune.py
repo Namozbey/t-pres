@@ -1,9 +1,9 @@
 #fine_tune.py
 import os
 
-# # This single line fixes BOTH the dense and sparse attention modules!
-# os.environ['ATTN_BACKEND'] = 'xformers' 
-# os.environ['SPCONV_ALGO'] = 'native'
+# This single line fixes BOTH the dense and sparse attention modules!
+os.environ['ATTN_BACKEND'] = 'xformers' 
+os.environ['SPCONV_ALGO'] = 'native'
 
 import torch
 import torch.optim as optim
@@ -64,14 +64,19 @@ def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch):
         else:
             # 2. SAMPLE NOISE AND TIMESTEPS
             batch_size = x_1_data.shape[0]
-            t = torch.rand(batch_size, device=device) # Sample t in [0, 1]
-            epsilon_noise = torch.randn_like(x_1_data) # This is x_0
+            # Logit-Normal sampling (Required for training stability!)
+            u = torch.randn(batch_size, device=device)
+            t = torch.sigmoid(u) # t is in [0, 1]
+
+            # In TRELLIS (Eq. 5), x_0 is DATA and epsilon is NOISE.
+            x_0_data = x_1_data
+            epsilon_noise = torch.randn_like(x_0_data)
 
             t_broadcast = t.view(batch_size, 1, 1, 1, 1)
 
-            # 3. FLOW MATCHING INTERPOLATION (Rectified Flow)
-            # Linear interpolation: t=0 is noise, t=1 is data
-            x_t = (t_broadcast * x_1_data) + ((1.0 - t_broadcast) * epsilon_noise)
+            # 3. FLOW MATCHING INTERPOLATION (x(t) = (1-t)*x_0 + t*epsilon)
+            # t=0 is Clean Data, t=1 is Pure Noise
+            x_t = ((1.0 - t_broadcast) * x_0_data) + (t_broadcast * epsilon_noise)
             x_t.requires_grad_(True)
         
         # 4. PREDICTION
@@ -79,11 +84,12 @@ def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch):
         predicted_velocity = model_wrapper(x_t, t * 1000.0, sketches)
 
         # 5. LOSS
-        # The target is the direction pointing from noise (x_0) to data (x_1)
-        target_velocity = x_1_data - epsilon_noise
+        # TRELLIS target velocity points from Data TO Noise
+        target_velocity = epsilon_noise - x_0_data
         loss = F.mse_loss(predicted_velocity, target_velocity)
 
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model_wrapper.lora_dit.parameters(), max_norm=1.0)
         optimizer.step()
 
         # -------------------------------------------------------------

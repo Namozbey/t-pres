@@ -17,12 +17,12 @@ TRAINING_CONFIG = {
     "data_root": "./dataloader/data",
     "category": "chair",
     "image_size": 518,
-    "batch_size": 1,
-    "num_workers": 1,
+    "batch_size": 2,
+    "num_workers": 2,
 
     # Optimization Hyperparameters
-    "epochs": 100,
-    "learning_rate": 1e-4,
+    "epochs": 1000,
+    "learning_rate": 2e-5,
     "weight_decay": 0.0,
 
     # Architecture Settings
