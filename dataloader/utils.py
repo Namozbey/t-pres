@@ -70,8 +70,8 @@ def generate_sketch_pairs(glb_path, num_views=3):
     # Add a strong Directional Light
     light = pyrender.DirectionalLight(color=np.ones(3), intensity=4.0)
     
-    # Create the offscreen renderer (512x512 resolution)
-    renderer = pyrender.OffscreenRenderer(512, 512)
+    # Create the offscreen renderer (518x518 resolution)
+    renderer = pyrender.OffscreenRenderer(518, 518)
     
     # Orbit parameters
     azimuths = np.linspace(np.pi / 9, 2 * np.pi + np.pi / 9, num_views, endpoint=False)
