@@ -44,39 +44,42 @@ def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch):
         x_1_data = (raw_ss_latent - model_wrapper.slat_mean) / model_wrapper.slat_std
 
         if TRAINING_CONFIG["hardcode_timestep"]:
-            # -------------------------------------------------------------
-            # 2 & 3. DETERMINISTIC FLOW MATCHING (STRICT OVERFIT TEST)
-            # -------------------------------------------------------------
             batch_size = x_1_data.shape[0]
-            
-            # FREEZE TIME: Hardcode the timestep to exactly the halfway point
-            t = torch.ones(batch_size, device=device) * 0.5 
-            
-            # FREEZE NOISE: Use a manual seed so the noise is identical every epoch
+
+            t = torch.ones(batch_size, device=device) * 0.5
+
             generator = torch.Generator(device=device).manual_seed(42)
             epsilon_noise = torch.randn(x_1_data.size(), generator=generator, device=device)
-            
+
+            x_0_data = x_1_data
+            sigma_min = getattr(model_wrapper, "sigma_min", 1e-5)
+
             t_broadcast = t.view(batch_size, 1, 1, 1, 1)
 
-            # Linear interpolation: t=0 is noise, t=1 is data
-            x_t = (t_broadcast * x_1_data) + ((1.0 - t_broadcast) * epsilon_noise)
+            x_t = (
+                (1.0 - t_broadcast) * x_0_data +
+                (sigma_min + (1.0 - sigma_min) * t_broadcast) * epsilon_noise
+            )
+
             x_t.requires_grad_(True)
         else:
-            # 2. SAMPLE NOISE AND TIMESTEPS
             batch_size = x_1_data.shape[0]
-            # Logit-Normal sampling (Required for training stability!)
-            u = torch.randn(batch_size, device=device)
-            t = torch.sigmoid(u) # t is in [0, 1]
 
-            # In TRELLIS (Eq. 5), x_0 is DATA and epsilon is NOISE.
+            t = torch.linspace(0, 1, batch_size, device=device)
+            t = t[torch.randperm(batch_size)]
+
             x_0_data = x_1_data
             epsilon_noise = torch.randn_like(x_0_data)
 
+            sigma_min = getattr(model_wrapper, "sigma_min", 1e-5)
+
             t_broadcast = t.view(batch_size, 1, 1, 1, 1)
 
-            # 3. FLOW MATCHING INTERPOLATION (x(t) = (1-t)*x_0 + t*epsilon)
-            # t=0 is Clean Data, t=1 is Pure Noise
-            x_t = ((1.0 - t_broadcast) * x_0_data) + (t_broadcast * epsilon_noise)
+            x_t = (
+                (1.0 - t_broadcast) * x_0_data +
+                (sigma_min + (1.0 - sigma_min) * t_broadcast) * epsilon_noise
+            )
+
             x_t.requires_grad_(True)
         
         # 4. PREDICTION
@@ -85,7 +88,7 @@ def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch):
 
         # 5. LOSS
         # TRELLIS target velocity points from Data TO Noise
-        target_velocity = epsilon_noise - x_0_data
+        target_velocity = (1.0 - sigma_min) * epsilon_noise - x_0_data
         loss = F.mse_loss(predicted_velocity, target_velocity)
 
         loss.backward()
