@@ -22,82 +22,86 @@ from config import TRAINING_CONFIG, WANDB_CONFIG
 
 def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch):
     """
-    Runs a single optimization pass.
+    Runs a single optimization pass matching native TRELLIS math precisely.
     """
-    # Ensure active training modules are in train mode, frozen components stay in eval
     model_wrapper.lora_dit.train()
     model_wrapper.cond_encoder.eval()
     
     epoch_loss = 0.0
     num_batches = len(dataloader)
+    sigma_min = getattr(model_wrapper, "sigma_min", 1e-5)
 
-    
     for batch_idx, batch in enumerate(dataloader):
         optimizer.zero_grad()
 
+        # ==========================================
         # 1. LOAD & NORMALIZE DATA
-        # raw_ss_latent is [B, 8, 16, 16, 16][cite: 1, 2]
+        # ==========================================
         raw_ss_latent = batch['ss_latent'].to(device)
         sketches = batch['sketch'].to(device)
 
-        # Apply the registered normalization buffers from architecture.py
-        x_1_data = (raw_ss_latent - model_wrapper.slat_mean) / model_wrapper.slat_std
+        # TRELLIS math tracking: x_0 is clean data, noise is epsilon
+        x_0 = (raw_ss_latent - model_wrapper.slat_mean) / model_wrapper.slat_std
+        batch_size = x_0.shape[0]
+        noise = torch.randn_like(x_0)
 
+        # ==========================================
+        # 2. ALIGNED TIMESTEP SCHEDULER
+        # ==========================================
         if TRAINING_CONFIG["hardcode_timestep"]:
-            batch_size = x_1_data.shape[0]
-
             t = torch.ones(batch_size, device=device) * 0.5
-
-            generator = torch.Generator(device=device).manual_seed(42)
-            epsilon_noise = torch.randn(x_1_data.size(), generator=generator, device=device)
-
-            x_0_data = x_1_data
-            sigma_min = getattr(model_wrapper, "sigma_min", 1e-5)
-
-            t_broadcast = t.view(batch_size, 1, 1, 1, 1)
-
-            x_t = (
-                (1.0 - t_broadcast) * x_0_data +
-                (sigma_min + (1.0 - sigma_min) * t_broadcast) * epsilon_noise
-            )
-
-            x_t.requires_grad_(True)
         else:
-            batch_size = x_1_data.shape[0]
+            # Native TRELLIS Logit-Normal schedule setup
+            mean, std = 0.0, 1.0
+            t = torch.sigmoid(torch.randn(batch_size, device=device) * std + mean)
 
-            t = torch.linspace(0, 1, batch_size, device=device)
-            t = t[torch.randperm(batch_size)]
+        t_broadcast = t.view(batch_size, 1, 1, 1, 1)
 
-            x_0_data = x_1_data
-            epsilon_noise = torch.randn_like(x_0_data)
-
-            sigma_min = getattr(model_wrapper, "sigma_min", 1e-5)
-
-            t_broadcast = t.view(batch_size, 1, 1, 1, 1)
-
-            x_t = (
-                (1.0 - t_broadcast) * x_0_data +
-                (sigma_min + (1.0 - sigma_min) * t_broadcast) * epsilon_noise
-            )
-
-            x_t.requires_grad_(True)
+        # ==========================================
+        # 3. NATIVE TRELLIS TRAJECTORY (diffuse)
+        # ==========================================
+        x_t = (1.0 - t_broadcast) * x_0 + (sigma_min + (1.0 - sigma_min) * t_broadcast) * noise
+        x_t.requires_grad_(True)
         
+        # ==========================================
         # 4. PREDICTION
-        # Scale t to [0, 1000] for the model's TimestepEmbedder[cite: 5]
+        # ==========================================
         predicted_velocity = model_wrapper(x_t, t * 1000.0, sketches)
 
-        # 5. LOSS
-        # TRELLIS target velocity points from Data TO Noise
-        target_velocity = (1.0 - sigma_min) * epsilon_noise - x_0_data
+        print(
+            "pred abs mean:",
+            predicted_velocity.abs().mean().item()
+        )
+
+        print(
+            "target abs mean:",
+            target_velocity.abs().mean().item()
+        )
+
+        # ==========================================
+        # 5. ALIGNED LOSS TARGET (get_v)
+        # ==========================================
+        target_velocity = (1.0 - sigma_min) * noise - x_0
         loss = F.mse_loss(predicted_velocity, target_velocity)
 
+        # ==========================================
+        # 6. BACKWARD STEP
+        # ==========================================
         loss.backward()
+
+        total_grad = 0.0
+
+        for name, p in model_wrapper.lora_dit.named_parameters():
+            if p.requires_grad and p.grad is not None:
+                total_grad += p.grad.abs().mean().item()
+
+        print("total grad:", total_grad)
+
+
         torch.nn.utils.clip_grad_norm_(model_wrapper.lora_dit.parameters(), max_norm=1.0)
         optimizer.step()
 
-        # -------------------------------------------------------------
-        # LOG STEP-LEVEL LOSS TO W&B
-        # -------------------------------------------------------------
+        # Logging
         global_step = (current_epoch - 1) * num_batches + batch_idx
         wandb.log({
             "train/batch_loss": loss.item(),

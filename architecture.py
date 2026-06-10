@@ -112,14 +112,19 @@ def setup_trainable_structure_pipeline():
     # -------------------------------------------------------------
     # GRADIENT CHECKPOINTING ACTIVATION (CRITICAL FOR 24GB VRAM)
     # -------------------------------------------------------------
-    print("Activating Gradient Checkpointing on base backbone...")
-    # This tells PyTorch to discard intermediate activations and recalculate them 
-    # during the backward pass, saving massive amounts of VRAM.
-    if hasattr(model_wrapper.lora_dit.base_model.model, "gradient_checkpointing_enable"):
+    print("Activating Gradient Checkpointing via PEFT helper...")
+    
+    # 1. First enable input gradients on the wrapper module 
+    # (Crucial for frozen backbones with trainable adapters!)
+    if hasattr(model_wrapper.lora_dit, "enable_input_require_grads"):
+        model_wrapper.lora_dit.enable_input_require_grads()
+        
+    # 2. Use PEFT's native helper to enable checkpointing safely
+    if hasattr(model_wrapper.lora_dit, "gradient_checkpointing_enable"):
+        model_wrapper.lora_dit.gradient_checkpointing_enable()
+    elif hasattr(model_wrapper.lora_dit.base_model.model, "gradient_checkpointing_enable"):
+        # Fallback to the underlying model if PEFT top-level is structured differently
         model_wrapper.lora_dit.base_model.model.gradient_checkpointing_enable()
-    else:
-        # Fallback if TRELLIS uses a custom flag name
-        print("WARNING: Ensure gradient checkpointing is manually set in your TRELLIS DiT config!")
 
     # -------------------------------------------------------------
     # VERIFICATION AUDIT
