@@ -49,8 +49,8 @@ class TrellisSketchTrainingArchitecture(nn.Module):
         self.register_buffer("slat_mean", torch.tensor(pipeline.slat_normalization['mean']).view(1, 8, 1, 1, 1))
         self.register_buffer("slat_std", torch.tensor(pipeline.slat_normalization['std']).view(1, 8, 1, 1, 1))
 
-        self.register_buffer("cond_shape_ref", None)
-        self.register_buffer("cond_dtype_ref", torch.float32)
+        self.cond_shape_ref = None
+        self.cond_dtype_ref = torch.float32
 
     def _validate_cond(self, cond_tokens):
         if self.cond_shape_ref is None:
