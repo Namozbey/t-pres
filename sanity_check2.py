@@ -32,25 +32,6 @@ def get_custom_sketch_tokens(cache_path, device):
         "neg_cond": cond_dict["neg_cond"].to(device)
     }
 
-def build_fresh_pipeline(base_state):
-    pipe = TrellisImageTo3DPipeline.from_pretrained(
-        TRAINING_CONFIG["model_backbone"]
-    )
-    pipe.to(device)
-
-    pipe.models["sparse_structure_flow_model"].load_state_dict(
-        base_state,
-        strict=True
-    )
-
-    for name in dir(pipe.models):
-        module = getattr(pipe.models, name)
-
-        if hasattr(module, "eval") and callable(module.eval):
-            module.eval()
-
-    return pipe
-
 # =====================================================================
 # EXECUTION LIFECYCLE
 # =====================================================================
@@ -108,8 +89,8 @@ def export_assets(outputs, prefix, output_dir):
             mesh_video = render_utils.render_video(outputs['mesh'][0])['normal']
             imageio.mimsave(os.path.join(output_dir, f"{prefix}_sample_mesh.mp4"), mesh_video, fps=30)
 
-        glb = postprocessing_utils.to_glb(outputs['gaussian'][0], outputs['mesh'][0], simplify=0.95)
-        glb.export(os.path.join(output_dir, f"{prefix}_generated_mesh.glb"))
+        # glb = postprocessing_utils.to_glb(outputs['gaussian'][0], outputs['mesh'][0], simplify=0.95)
+        # glb.export(os.path.join(output_dir, f"{prefix}_generated_mesh.glb"))
         print(f"[SUCCESS] Exported {prefix} asset bundle.")
     except Exception as e:
         print(f"[ERROR] Failed exporting asset frame bundles for {prefix}: {e}")
@@ -135,6 +116,21 @@ base_state = {
     for k, v in base_pipeline.models["sparse_structure_flow_model"].state_dict().items()
 }
 
+def reset_model_state(pipe):
+    """
+    Restores the original backbone weights before each experiment.
+    Prevents LoRA / mutation leakage between runs.
+    """
+    pipe.models["sparse_structure_flow_model"].load_state_dict(
+        base_state,
+        strict=True
+    )
+
+    # ensure eval mode stays consistent
+    for m in pipe.models.values():
+        if hasattr(m, "eval"):
+            m.eval()
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Strict Multi-Run TRELLIS Diagnostic")
     parser.add_argument("--sketch", type=str, required=True, help="Path to input sketch")
@@ -153,12 +149,10 @@ if __name__ == "__main__":
     print("RUN 1: LOADING PURE STOCK VANILLA PIPELINE")
     print("====================================================")
     # FIX: Load first, do NOT chain .to(device) on the from_pretrained call!
-    pipe1 = build_fresh_pipeline(base_state)
-    pipe2 = build_fresh_pipeline(base_state)
-    pipe3 = build_fresh_pipeline(base_state)
+    pipe = base_pipeline
     
     print("\n--- Running Stock pipeline.run() ---")
-    vanilla_outputs = pipe1.run(sketch_image, seed=42)
+    vanilla_outputs = pipe.run(sketch_image, seed=42)
     export_assets(vanilla_outputs, prefix="1_pure_vanilla", output_dir=args.output_dir)
     
     # Extract tokens from the fresh vanilla graph *before* we delete it
@@ -189,7 +183,9 @@ if __name__ == "__main__":
     print("====================================================")
     # Using the same vanilla pipeline instance before we inject LoRA anywhere near memory
     print("Feeding custom conditioning dict directly into the clean, stock base model layers...")
-    san_check_outputs = run_manual_inference_flow(pipe2, custom_cond)
+    reset_model_state(pipe)
+    torch.cuda.empty_cache()
+    san_check_outputs = run_manual_inference_flow(pipe, custom_cond)
     export_assets(san_check_outputs, prefix="2_vanilla_plus_custom_tokens", output_dir=args.output_dir)
     
     # -----------------------------------------------------------------
@@ -199,17 +195,19 @@ if __name__ == "__main__":
     print("RUN 3: INJECTING LORA INTO THE SYSTEM GRAPH")
     print("====================================================")
     print("Wrapping base model structures with PEFT configurations...")
-    base_dit = pipe3.models['sparse_structure_flow_model']
+    reset_model_state(pipe)
+    torch.cuda.empty_cache()
+    base_dit = pipe.models['sparse_structure_flow_model']
     lora_model = PeftModel.from_pretrained(base_dit, args.checkpoint)
-    pipe3.models['sparse_structure_flow_model'] = lora_model.merge_and_unload()
+    pipe.models['sparse_structure_flow_model'] = lora_model.merge_and_unload()
     
     # Keep everything pinned to eval mode
-    for name, model in pipe3.models.items():
+    for name, model in pipe.models.items():
         if hasattr(model, "eval"):
             model.eval()
     
     print("\n--- Running Generation on Fine-Tuned System Stack ---")
-    lora_outputs = run_manual_inference_flow(pipe3, custom_cond)
+    lora_outputs = run_manual_inference_flow(pipe, custom_cond)
     export_assets(lora_outputs, prefix="3_fine_tuned_lora", output_dir=args.output_dir)
     
     print(f"\n[DIAGNOSTICS COMPLETE] Compare results inside: {args.output_dir}")
