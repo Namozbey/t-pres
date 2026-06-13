@@ -1,6 +1,6 @@
 import os
-os.environ['ATTN_BACKEND'] = 'xformers' 
-os.environ['SPCONV_ALGO'] = 'native'
+# os.environ['ATTN_BACKEND'] = 'xformers' 
+# os.environ['SPCONV_ALGO'] = 'native'
 
 import argparse
 import torch
@@ -35,7 +35,8 @@ def get_custom_sketch_tokens(cache_path, device):
 def build_fresh_pipeline(base_state):
     pipe = TrellisImageTo3DPipeline.from_pretrained(
         TRAINING_CONFIG["model_backbone"]
-    ).to(device)
+    )
+    pipe.to(device)
 
     pipe.models["sparse_structure_flow_model"].load_state_dict(
         base_state,
@@ -118,16 +119,16 @@ def export_assets(outputs, prefix, output_dir):
 # =====================================================================
 print("Loading base pipeline once...")
 
-base_pipeline = TrellisImageTo3DPipeline.from_pretrained(
-    TRAINING_CONFIG["model_backbone"]
-).to(device)
+base_pipeline = TrellisImageTo3DPipeline.from_pretrained(TRAINING_CONFIG["model_backbone"])
+base_pipeline.to(device)
+
+assert base_pipeline is not None, "Pipeline failed to load (None returned)"
+assert hasattr(base_pipeline, "models"), "Invalid pipeline object"
 
 
-for name in dir(base_pipeline.models):
-    module = getattr(base_pipeline.models, name)
-
-    if hasattr(module, "eval") and callable(module.eval):
-        module.eval()
+for m in base_pipeline.models.values():
+    if hasattr(m, "eval"):
+        m.eval()
 
 base_state = {
     k: v.detach().cpu().clone()
@@ -213,4 +214,4 @@ if __name__ == "__main__":
     
     print(f"\n[DIAGNOSTICS COMPLETE] Compare results inside: {args.output_dir}")
 
-#python sanity_check.py --sketch "./dataloader/data/chair/sketches/8a4a3a90bc104f11b82cedd9b4e5ab6b_0.png" --checkpoint "./checkpoints/trellis_lora_epoch_10" --output_dir "./diagnostic_outputs"
+#python sanity_check2.py --sketch "./dataloader/data/chair/sketches/8a4a3a90bc104f11b82cedd9b4e5ab6b_0.png" --checkpoint "./checkpoints/trellis_lora_epoch_10" --output_dir "./diagnostic_outputs"
