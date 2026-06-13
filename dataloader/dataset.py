@@ -7,7 +7,7 @@ from torchvision import transforms
 from torch.utils.data import Dataset
 
 class SketchMeshDataset(Dataset):
-    def __init__(self, root_dir, category="chair", image_size=512, transform=None):
+    def __init__(self, root_dir, category="chair", image_size=518, transform=None):
         """
         Args:
             root_dir (str): Path to the base data directory (e.g., 'data')

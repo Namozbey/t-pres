@@ -44,7 +44,25 @@ def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch):
         x_0 = (raw_ss_latent - model_wrapper.slat_mean) / model_wrapper.slat_std
         batch_size = x_0.shape[0]
         noise = torch.randn_like(x_0)
+        print("raw_ss shape:", raw_ss_latent.shape)
+        print("norm shape:", model_wrapper.slat_mean.shape)
 
+        print(
+            "raw_ss mean/std:",
+            raw_ss_latent.mean().item(),
+            raw_ss_latent.std().item()
+        )
+
+        x_0 = (
+            raw_ss_latent
+            - model_wrapper.slat_mean
+        ) / model_wrapper.slat_std
+
+        print(
+            "x0 mean/std:",
+            x_0.mean().item(),
+            x_0.std().item()
+        )
         # ==========================================
         # 2. ALIGNED TIMESTEP SCHEDULER
         # ==========================================
@@ -61,7 +79,6 @@ def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch):
         # 3. NATIVE TRELLIS TRAJECTORY (diffuse)
         # ==========================================
         x_t = (1.0 - t_broadcast) * x_0 + (sigma_min + (1.0 - sigma_min) * t_broadcast) * noise
-        x_t.requires_grad_(True)
         
         # ==========================================
         # 4. PREDICTION
@@ -72,17 +89,16 @@ def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch):
             "pred abs mean:",
             predicted_velocity.abs().mean().item()
         )
-
-        print(
-            "target abs mean:",
-            target_velocity.abs().mean().item()
-        )
-
         # ==========================================
         # 5. ALIGNED LOSS TARGET (get_v)
         # ==========================================
         target_velocity = (1.0 - sigma_min) * noise - x_0
         loss = F.mse_loss(predicted_velocity, target_velocity)
+
+        print(
+            "target abs mean:",
+            target_velocity.abs().mean().item()
+        )
 
         # ==========================================
         # 6. BACKWARD STEP

@@ -4,6 +4,7 @@ import torch.nn as nn
 from TRELLIS.trellis.pipelines import TrellisImageTo3DPipeline
 from peft import LoraConfig, get_peft_model
 from config import TRAINING_CONFIG
+import torch.nn.functional as F
 
 # =====================================================================
 # THE STRUCTURAL ENGINE WRAPPER
@@ -60,23 +61,32 @@ class TrellisSketchTrainingArchitecture(nn.Module):
         Extracts DINOv2 visual tokens from batched training tensors 
         and pads them to exactly 1374 length to match native TRELLIS shapes.
         """
-        # 1. Extract the base 1370 tokens from your training batch tensor
-        # (This matches your training loop setup)
-        features = self.cond_encoder(sketch_tensor, is_training=True)
-        cls_token = features['x_norm_clstoken'].unsqueeze(1) # [B, 1, C]
-        patch_tokens = features['x_norm_patchtokens']        # [B, N, C]
-        cond_tokens = torch.cat([cls_token, patch_tokens], dim=1) # Shape: [B, 1370, C]
-        
-        # 2. Add the 4 empty structural tokens used by the native pipeline
-        # This matches the 1374 shape from the sanity check perfectly!
-        padding_tokens = torch.zeros(
-            (cond_tokens.shape[0], 4, cond_tokens.shape[2]), 
-            dtype=cond_tokens.dtype, 
-            device=cond_tokens.device
-        )
-        aligned_tokens = torch.cat([cond_tokens, padding_tokens], dim=1) # Perfect [B, 1374, C]
-        
-        return aligned_tokens
+        mean = torch.tensor(
+            [0.485, 0.456, 0.406],
+            device=sketch_tensor.device
+        ).view(1, 3, 1, 1)
+
+        std = torch.tensor(
+            [0.229, 0.224, 0.225],
+            device=sketch_tensor.device
+        ).view(1, 3, 1, 1)
+
+        sketch_tensor = (sketch_tensor - mean) / std
+
+        self.cond_encoder.eval()
+
+        with torch.no_grad():
+            features = self.cond_encoder(
+                sketch_tensor,
+                is_training=True
+            )['x_prenorm']
+
+            cond_tokens = F.layer_norm(
+                features,
+                features.shape[-1:]
+            )
+
+        return cond_tokens
 
     def forward(self, x_t, t, sketch_tensor):
         """
@@ -84,6 +94,10 @@ class TrellisSketchTrainingArchitecture(nn.Module):
         """
         # 1. Process sketches into tokens cleanly (VRAM Safe)
         cond_tokens = self.get_sketch_tokens(sketch_tensor)
+
+        if not hasattr(self, "_printed_shape"):
+            print("cond shape:", cond_tokens.shape)
+            self._printed_shape = True
         
         # 2. Run the Flow Matching prediction step through LoRA layers
         predicted_velocity = self.lora_dit(x_t, t, cond=cond_tokens)
