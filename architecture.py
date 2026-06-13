@@ -49,60 +49,28 @@ class TrellisSketchTrainingArchitecture(nn.Module):
         self.register_buffer("slat_mean", torch.tensor(pipeline.slat_normalization['mean']).view(1, 8, 1, 1, 1))
         self.register_buffer("slat_std", torch.tensor(pipeline.slat_normalization['std']).view(1, 8, 1, 1, 1))
 
-        print("Extracting and locking 'image_cond_model' for sketch features...")
-        self.cond_encoder = pipeline.models['image_cond_model']
-        # Freeze 100% of Microsoft's original weights
-        self.cond_encoder.requires_grad_(False)
-        # Set to evaluation mode
-        self.cond_encoder.eval()
+        self.register_buffer("cond_shape_ref", None)
+        self.register_buffer("cond_dtype_ref", torch.float32)
 
-    def get_sketch_tokens(self, sketch_tensor):
-        """
-        Extracts DINOv2 visual tokens from batched training tensors 
-        and pads them to exactly 1374 length to match native TRELLIS shapes.
-        """
-        mean = torch.tensor(
-            [0.485, 0.456, 0.406],
-            device=sketch_tensor.device
-        ).view(1, 3, 1, 1)
+    def _validate_cond(self, cond_tokens):
+        if self.cond_shape_ref is None:
+            self.cond_shape_ref = torch.tensor(cond_tokens.shape)
 
-        std = torch.tensor(
-            [0.229, 0.224, 0.225],
-            device=sketch_tensor.device
-        ).view(1, 3, 1, 1)
+        assert cond_tokens.shape == tuple(self.cond_shape_ref.tolist()), \
+            f"Cond shape mismatch: {cond_tokens.shape}"
 
-        sketch_tensor = (sketch_tensor - mean) / std
-
-        self.cond_encoder.eval()
-
-        with torch.no_grad():
-            features = self.cond_encoder(
-                sketch_tensor,
-                is_training=True
-            )['x_prenorm']
-
-            cond_tokens = F.layer_norm(
-                features,
-                features.shape[-1:]
-            )
+        assert cond_tokens.dtype == torch.float32, \
+            f"Cond dtype must be float32, got {cond_tokens.dtype}"
 
         return cond_tokens
 
-    def forward(self, x_t, t, sketch_tensor):
-        """
-        Unified forward pass to be invoked inside the training loop.
-        """
-        # 1. Process sketches into tokens cleanly (VRAM Safe)
-        cond_tokens = self.get_sketch_tokens(sketch_tensor)
-
-        if not hasattr(self, "_printed_shape"):
-            print("cond shape:", cond_tokens.shape)
-            self._printed_shape = True
-        
-        # 2. Run the Flow Matching prediction step through LoRA layers
-        predicted_velocity = self.lora_dit(x_t, t, cond=cond_tokens)
-        
-        return predicted_velocity
+    def forward(self, x_t, t, cond_tokens):
+        cond_tokens = self._validate_cond(cond_tokens)
+        return self.lora_dit(
+            x_t,
+            t,
+            cond=cond_tokens
+        )
 
 # =====================================================================
 # PIPELINE CONFIGURATION BUILDER

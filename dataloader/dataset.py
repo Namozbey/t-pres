@@ -1,3 +1,4 @@
+#dataset.py
 import os
 import glob
 import torch
@@ -24,6 +25,7 @@ class SketchMeshDataset(Dataset):
         self.mesh_dir = os.path.join(self.base_path, "meshes")
         self.latent_dir = os.path.join(self.base_path, "latents", "dinov2_vitl14_reg_slat_enc_swin8_B_64l8_fp16")
         self.ss_latent_dir = os.path.join(self.base_path, "ss_latents", "ss_enc_conv3d_16l8_fp16")
+        self.cond_cache_dir = os.path.join(self.base_path, "sketch_cache")
         
         # Base transforms: Convert PIL Image to PyTorch Tensor (scales 0-255 to 0.0-1.0)
         # and resizes to the expected model input size.
@@ -92,6 +94,14 @@ class SketchMeshDataset(Dataset):
         feats = torch.from_numpy(latent_data['feats']).float()
         coords = torch.from_numpy(latent_data['coords']).int()
         ss_latent = torch.from_numpy(ss_latent_data['mean']).float()
+
+        cond_path = os.path.join(self.cond_cache_dir, f"{item["uid"]}.pt")
+        cond_data = torch.load(cond_path, map_location="cpu")
+
+        cond_tokens = {
+            "cond": cond_data["cond"].float(),
+            "neg_cond": cond_data["neg_cond"].float()
+        }
             
         return {
             ## Tensors
@@ -100,6 +110,7 @@ class SketchMeshDataset(Dataset):
             "latent_feats": feats,
             "latent_coords": coords,
             "ss_latent": ss_latent,
+            "cond_tokens": cond_tokens,
             
             ## Strings
             "uid": item["uid"],

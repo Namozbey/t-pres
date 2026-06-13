@@ -25,7 +25,6 @@ def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch):
     Runs a single optimization pass matching native TRELLIS math precisely.
     """
     model_wrapper.lora_dit.train()
-    model_wrapper.cond_encoder.eval()
     
     epoch_loss = 0.0
     num_batches = len(dataloader)
@@ -38,7 +37,10 @@ def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch):
         # 1. LOAD & NORMALIZE DATA
         # ==========================================
         raw_ss_latent = batch['ss_latent'].to(device)
-        sketches = batch['sketch'].to(device)
+        cond_tokens = {
+            "cond": batch["cond_tokens"]["cond"].to(device),
+            "neg_cond": batch["cond_tokens"]["neg_cond"].to(device),
+        }
 
         # TRELLIS math tracking: x_0 is clean data, noise is epsilon
         x_0 = (raw_ss_latent - model_wrapper.slat_mean) / model_wrapper.slat_std
@@ -52,11 +54,6 @@ def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch):
             raw_ss_latent.mean().item(),
             raw_ss_latent.std().item()
         )
-
-        x_0 = (
-            raw_ss_latent
-            - model_wrapper.slat_mean
-        ) / model_wrapper.slat_std
 
         print(
             "x0 mean/std:",
@@ -83,7 +80,12 @@ def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch):
         # ==========================================
         # 4. PREDICTION
         # ==========================================
-        predicted_velocity = model_wrapper(x_t, t * 1000.0, sketches)
+
+        predicted_velocity = model_wrapper(
+            x_t,
+            t * 1000.0,
+            cond_tokens
+        )
 
         print(
             "pred abs mean:",
