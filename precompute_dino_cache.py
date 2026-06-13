@@ -1,5 +1,8 @@
 # precompute_cond_cache.py
 import os
+os.environ['ATTN_BACKEND'] = 'xformers' 
+os.environ['SPCONV_ALGO'] = 'native'
+
 import torch
 from PIL import Image
 from TRELLIS.trellis.pipelines import TrellisImageTo3DPipeline
@@ -19,8 +22,8 @@ def get_custom_sketch_tokens(pipeline, sketch_image):
     print(cond["cond"].shape, cond["neg_cond"].shape)
 
     return {
-        "cond": cond["cond"].cpu(),
-        "neg_cond": cond["neg_cond"].cpu()
+        "cond": cond["cond"],
+        "neg_cond": cond["neg_cond"]
     }
 
 
@@ -53,9 +56,10 @@ def main():
         cond_tokens = get_custom_sketch_tokens(pipeline, img)
 
         uid = os.path.splitext(file)[0]
-        torch.save(cond_tokens.cpu(), os.path.join(cache_dir, f"{uid}.pt"))
+        torch.save(cond_tokens, os.path.join(cache_dir, f"{uid}.pt"))
 
-        print("cached:", uid, "shape:", cond_tokens.shape)
+        print("cached:", uid, "cond_shape:", cond_tokens["cond"].shape)
+        print("cached:", uid, "neg_cond_shape:", cond_tokens["neg_cond"].shape)
 
 
 if __name__ == "__main__":
