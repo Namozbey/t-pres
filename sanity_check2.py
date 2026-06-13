@@ -42,9 +42,11 @@ def build_fresh_pipeline(base_state):
         strict=True
     )
 
-    for m in pipe.models.values():
-        if hasattr(m, "eval"):
-            m.eval()
+    for name in dir(pipe.models):
+        module = getattr(pipe.models, name)
+
+        if hasattr(module, "eval") and callable(module.eval):
+            module.eval()
 
     return pipe
 
