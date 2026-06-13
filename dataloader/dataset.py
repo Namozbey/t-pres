@@ -46,21 +46,20 @@ class SketchMeshDataset(Dataset):
         valid_pairs = []
         
         for img_path in self.image_paths:
-            filename = os.path.basename(img_path)
-            sketch_path = os.path.join(self.sketch_dir, filename)
+            filename = os.path.basename(img_path).split('.')[0]
+            sketch_path = os.path.join(self.sketch_dir, f"{filename}.png")
+            cond_path = os.path.join(self.cond_cache_dir, f"{filename}.pt")
             
             # Use the UID to find the target latent .npz file
             uid = filename.split('_')[0]
             mesh_path = os.path.join(self.mesh_dir, f"{uid}.glb")
             latent_path = os.path.join(self.latent_dir, f"{uid}.npz")
             ss_latent_path = os.path.join(self.ss_latent_dir, f"{uid}.npz")
-            cond_path = os.path.join(self.cond_cache_dir, f"{uid}.pt")
-
             
             if os.path.exists(sketch_path) and os.path.exists(latent_path) and os.path.exists(ss_latent_path):
                 valid_pairs.append({
                     "uid": uid,
-                    "view_id": filename.split('_')[1].split('.')[0], 
+                    "view_id": filename.split('_')[1], 
                     "image_path": img_path,
                     "sketch_path": sketch_path,
                     "mesh_path": mesh_path,

@@ -176,7 +176,10 @@ def sparse_collate_fn(batch):
         "image": torch.stack([item["image"] for item in batch]),
         "sketch": torch.stack([item["sketch"] for item in batch]),
         "ss_latent": torch.stack([item["ss_latent"] for item in batch]),
-        "cond_tokens": torch.stack([item["cond_tokens"] for item in batch]),
+        "cond_tokens": {
+            "cond": torch.stack([item["cond_tokens"]["cond"] for item in batch]),
+            "neg_cond": torch.stack([item["cond_tokens"]["neg_cond"] for item in batch])
+        },
     }
     
     batched_feats = []

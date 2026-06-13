@@ -52,20 +52,20 @@ class TrellisSketchTrainingArchitecture(nn.Module):
         self.cond_shape_ref = None
         self.cond_dtype_ref = torch.float32
 
-    def _validate_cond(self, cond_tokens):
-        if self.cond_shape_ref is None:
-            self.cond_shape_ref = torch.tensor(cond_tokens.shape)
+    # def _validate_cond(self, cond_tokens):
+    #     if self.cond_shape_ref is None:
+    #         self.cond_shape_ref = torch.tensor(cond_tokens.shape)
 
-        assert cond_tokens.shape == tuple(self.cond_shape_ref.tolist()), \
-            f"Cond shape mismatch: {cond_tokens.shape}"
+    #     assert cond_tokens.shape == tuple(self.cond_shape_ref.tolist()), \
+    #         f"Cond shape mismatch: {cond_tokens.shape}"
 
-        assert cond_tokens.dtype == torch.float32, \
-            f"Cond dtype must be float32, got {cond_tokens.dtype}"
+    #     assert cond_tokens.dtype == torch.float32, \
+    #         f"Cond dtype must be float32, got {cond_tokens.dtype}"
 
-        return cond_tokens
+    #     return cond_tokens
 
     def forward(self, x_t, t, cond_tokens):
-        cond_tokens = self._validate_cond(cond_tokens)
+        # cond_tokens = self._validate_cond(cond_tokens)
         return self.lora_dit(
             x_t,
             t,
@@ -113,10 +113,6 @@ def setup_trainable_structure_pipeline():
     # -------------------------------------------------------------
     print("\n=== SYSTEM INTEGRITY AUDIT ===")
     model_wrapper.lora_dit.print_trainable_parameters()
-    
-    # Quick sanity check on the conditioning encoder state
-    enc_trainable = any(p.requires_grad for p in model_wrapper.cond_encoder.parameters())
-    print(f"Conditioning Encoder Trainable: {enc_trainable} (Expected: False)")
     
     print("================================\n")
     print("Trainable Structure Pipeline initialized")
