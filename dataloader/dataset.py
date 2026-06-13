@@ -54,6 +54,8 @@ class SketchMeshDataset(Dataset):
             mesh_path = os.path.join(self.mesh_dir, f"{uid}.glb")
             latent_path = os.path.join(self.latent_dir, f"{uid}.npz")
             ss_latent_path = os.path.join(self.ss_latent_dir, f"{uid}.npz")
+            cond_path = os.path.join(self.cond_cache_dir, f"{uid}.pt")
+
             
             if os.path.exists(sketch_path) and os.path.exists(latent_path) and os.path.exists(ss_latent_path):
                 valid_pairs.append({
@@ -64,6 +66,7 @@ class SketchMeshDataset(Dataset):
                     "mesh_path": mesh_path,
                     "latent_path": latent_path,
                     "ss_latent_path": ss_latent_path,
+                    "cond_path": cond_path,
                 })
             else:
                 print(f"Warning: Missing sketch or latent for {filename}. Skipping.")
@@ -95,8 +98,7 @@ class SketchMeshDataset(Dataset):
         coords = torch.from_numpy(latent_data['coords']).int()
         ss_latent = torch.from_numpy(ss_latent_data['mean']).float()
 
-        cond_path = os.path.join(self.cond_cache_dir, f"{item["uid"]}.pt")
-        cond_data = torch.load(cond_path, map_location="cpu")
+        cond_data = torch.load(item["cond_path"], map_location="cpu")
 
         cond_tokens = {
             "cond": cond_data["cond"].float(),
