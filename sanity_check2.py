@@ -122,9 +122,12 @@ base_pipeline = TrellisImageTo3DPipeline.from_pretrained(
     TRAINING_CONFIG["model_backbone"]
 ).to(device)
 
-for m in base_pipeline.models.values():
-    if hasattr(m, "eval"):
-        m.eval()
+
+for name in dir(base_pipeline.models):
+    module = getattr(base_pipeline.models, name)
+
+    if hasattr(module, "eval") and callable(module.eval):
+        module.eval()
 
 base_state = {
     k: v.detach().cpu().clone()
