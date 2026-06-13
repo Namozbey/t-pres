@@ -99,11 +99,9 @@ class SketchMeshDataset(Dataset):
 
         cond_data = torch.load(item["cond_path"], map_location="cpu")
 
-        cond_tokens = {
-            "cond": cond_data["cond"].float(),
-            "neg_cond": cond_data["neg_cond"].float()
-        }
-            
+        cond_tokens = cond_data["cond"].float().squeeze(0).squeeze(0)
+        neg_cond_tokens = cond_data["neg_cond"].float().squeeze(0).squeeze(0)
+
         return {
             ## Tensors
             "image": img_tensor,
@@ -112,6 +110,7 @@ class SketchMeshDataset(Dataset):
             "latent_coords": coords,
             "ss_latent": ss_latent,
             "cond_tokens": cond_tokens,
+            "neg_cond_tokens": neg_cond_tokens,
             
             ## Strings
             "uid": item["uid"],

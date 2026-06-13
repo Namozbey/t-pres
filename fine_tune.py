@@ -2,8 +2,8 @@
 import os
 
 # This single line fixes BOTH the dense and sparse attention modules!
-os.environ['ATTN_BACKEND'] = 'xformers' 
-os.environ['SPCONV_ALGO'] = 'native'
+# os.environ['ATTN_BACKEND'] = 'xformers' 
+# os.environ['SPCONV_ALGO'] = 'native'
 
 import torch
 import torch.optim as optim
@@ -37,11 +37,9 @@ def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch):
         # 1. LOAD & NORMALIZE DATA
         # ==========================================
         raw_ss_latent = batch['ss_latent'].to(device)
-        cond_tokens = {
-            "cond": batch["cond_tokens"]["cond"].to(device),
-            "neg_cond": batch["cond_tokens"]["neg_cond"].to(device),
-        }
-
+        cond_tokens = batch["cond_tokens"].to(device)
+        
+        print(f"cond_token_dim:{cond_tokens.shape}")
         # TRELLIS math tracking: x_0 is clean data, noise is epsilon
         x_0 = (raw_ss_latent - model_wrapper.slat_mean) / model_wrapper.slat_std
         batch_size = x_0.shape[0]
