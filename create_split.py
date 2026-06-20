@@ -3,13 +3,17 @@ import glob
 import json
 import random
 from collections import defaultdict
+from config import TRAINING_CONFIG
 
-ROOT = "./dataloader/data/chair"
+ROOT = TRAINING_CONFIG["data_root"]
+CATEGORY = TRAINING_CONFIG["category"]
 SEED = 42
 
 random.seed(SEED)
 
-mesh_dir = os.path.join(ROOT, "meshes")
+cat_dir = os.path.join(ROOT, CATEGORY)
+
+mesh_dir = os.path.join(cat_dir, "meshes")
 
 split_dict = {}
 
