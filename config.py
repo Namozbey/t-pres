@@ -12,6 +12,7 @@ TRAINING_CONFIG = {
     "checkpoints_dir": "./checkpoints",
     "save_every_n_epochs": 10,
     "hardcode_timestep": False,
+    "val_fixed_timestep": False,
 
     # Data Settings
     "data_root": "./dataloader/data",
@@ -36,7 +37,8 @@ TRAINING_CONFIG = {
     #     "fc1", "fc2", "proj", "mlp.fc1", "mlp.fc2" # Feed-Forward / MLP
     # ], 
     # ["to_q", "to_kv", "to_qkv", "to_out"],
-    "model_backbone": "E:/Nov1/AI/TRELLIS/TRELLIS-image-large"
+    #"model_backbone": "E:/Nov1/AI/TRELLIS/TRELLIS-image-large"
+    "model_backbone": "microsoft/TRELLIS-image-large"
 }
 
 WANDB_CONFIG = {

@@ -6,9 +6,10 @@ import numpy as np
 from PIL import Image
 from torchvision import transforms
 from torch.utils.data import Dataset
+import json
 
 class SketchMeshDataset(Dataset):
-    def __init__(self, root_dir, category="chair", image_size=518, transform=None):
+    def __init__(self, root_dir, category="chair", image_size=518, transform=None, split="train"):
         """
         Args:
             root_dir (str): Path to the base data directory (e.g., 'data')
@@ -19,6 +20,11 @@ class SketchMeshDataset(Dataset):
         self.root_dir = root_dir
         self.category = category
         self.base_path = os.path.join(root_dir, category)
+        self.split = split
+
+        split_path = os.path.join(self.base_path, "split.json")
+        with open(split_path, "r") as f:
+            self.split_info = json.load(f)
         
         self.img_dir = os.path.join(self.base_path, "images")
         self.sketch_dir = os.path.join(self.base_path, "sketches")
@@ -41,22 +47,28 @@ class SketchMeshDataset(Dataset):
         self.image_paths = glob.glob(os.path.join(self.img_dir, "*.png"))
         self.data_pairs = self._validate_and_pair_data()
 
+
     def _validate_and_pair_data(self):
         """Ensures every image has a matching sketch and SLAT latent."""
         valid_pairs = []
         
         for img_path in self.image_paths:
+
             filename = os.path.basename(img_path).split('.')[0]
+            uid, view_id = filename.split('_')
+            view_id = int(view_id)
+
+            if view_id not in self.split_info[uid][self.split]:
+                continue
+
             sketch_path = os.path.join(self.sketch_dir, f"{filename}.png")
             cond_path = os.path.join(self.cond_cache_dir, f"{filename}.pt")
             
-            # Use the UID to find the target latent .npz file
-            uid = filename.split('_')[0]
             mesh_path = os.path.join(self.mesh_dir, f"{uid}.glb")
             latent_path = os.path.join(self.latent_dir, f"{uid}.npz")
             ss_latent_path = os.path.join(self.ss_latent_dir, f"{uid}.npz")
             
-            if os.path.exists(sketch_path) and os.path.exists(latent_path) and os.path.exists(ss_latent_path):
+            if os.path.exists(sketch_path) and os.path.exists(cond_path) and os.path.exists(ss_latent_path):
                 valid_pairs.append({
                     "uid": uid,
                     "view_id": filename.split('_')[1], 

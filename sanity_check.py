@@ -27,9 +27,6 @@ def get_custom_sketch_tokens(pipeline, sketch_image, device):
     # Temporarily patch pipeline's image_cond_model to run eval behaviors
     cond_encoder = pipeline.models['image_cond_model']
     cond_encoder.eval()
-    for module in cond_encoder.modules():
-        if hasattr(module, 'drop_path'):   module.drop_path = 0.0
-        if hasattr(module, 'dropout'):     module.dropout = 0.0
 
     print("   [Token Alignment] Passing preprocessed list through native get_cond context...")
     with torch.no_grad():
