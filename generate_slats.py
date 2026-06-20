@@ -52,13 +52,14 @@ def generate_metadata(data_dir):
             "voxelized": False,
             "ss_encoded": False,
             "feature_dinov2_vitl14_reg": False,
-            "encoded": False
+            "encoded": False,
+            "dino_cache": False
         })
         
     df = pd.DataFrame(records)
     
     # Ensure columns are in the exact order as your original CSV
-    columns_order = ['id', 'sha256', 'local_path', 'rendered', 'voxelized', 'ss_encoded', 'feature_dinov2_vitl14_reg', 'encoded']
+    columns_order = ['id', 'sha256', 'local_path', 'rendered', 'voxelized', 'ss_encoded', 'feature_dinov2_vitl14_reg', 'encoded', 'dino_cache']
     df = df[columns_order]
     
     csv_path = os.path.join(data_dir, "metadata.csv")
@@ -106,6 +107,10 @@ def main():
     # 6. Structured Latent Encoding (The final SLAT files)
     run_command(["python", "TRELLIS/dataset_toolkits/encode_latent.py", "--output_dir", OUTPUT_DIR], env)
     update_csv_flag(csv_path, "encoded", True)
+    
+    # 6. Conditioning DINO features
+    run_command(["python", "precompute_dino_cache.py"], env)
+    update_csv_flag(csv_path, "dino_cache", True)
     
     print(f"\n🎉 SLAT generation complete! Latents ready in {os.path.join(OUTPUT_DIR, 'latents')}.")
 
