@@ -27,7 +27,7 @@ for mesh_path in glob.glob(os.path.join(mesh_dir, "*.glb")):
     filename = os.path.basename(mesh_path).split(".")[0]
     uid = filename  # mesh defines identity
 
-    uid_to_views[uid] = list(range(10))  # assume 10 renders per mesh
+    uid_to_views[uid] = list(range(5))  # assume 5 renders per mesh
 
 # ---------------------------------------
 # STEP 2: split per mesh
@@ -37,9 +37,9 @@ for uid, views in uid_to_views.items():
     views = sorted(views)
     random.shuffle(views)
 
-    val_views = views[:2]
-    test_views = views[2:4]
-    train_views = views[4:]
+    val_views = views[:1]
+    test_views = views[1:2]
+    train_views = views[2:]
 
     split_dict[uid] = {
         "train": sorted(train_views),
