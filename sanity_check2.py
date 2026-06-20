@@ -1,6 +1,6 @@
 import os
-# os.environ['ATTN_BACKEND'] = 'xformers' 
-# os.environ['SPCONV_ALGO'] = 'native'
+os.environ['ATTN_BACKEND'] = 'xformers' 
+os.environ['SPCONV_ALGO'] = 'native'
 
 import argparse
 import torch
@@ -79,21 +79,21 @@ def run_manual_inference_flow(pipeline, conditioning_dict):
         
     return outputs
 
-def export_assets(outputs, prefix, output_dir):
-    print(f"Rendering diagnostics for {prefix}...")
+def export_assets(outputs, finename, output_dir):
+    print(f"Rendering diagnostics for {finename}...")
     try:
         if 'gaussian' in outputs:
             gs_video = render_utils.render_video(outputs['gaussian'][0])['color']
-            imageio.mimsave(os.path.join(output_dir, f"{prefix}_sample_gs.mp4"), gs_video, fps=30)
+            imageio.mimsave(os.path.join(output_dir, f"gs_{finename}.mp4"), gs_video, fps=30)
         if 'mesh' in outputs:
             mesh_video = render_utils.render_video(outputs['mesh'][0])['normal']
-            imageio.mimsave(os.path.join(output_dir, f"{prefix}_sample_mesh.mp4"), mesh_video, fps=30)
+            imageio.mimsave(os.path.join(output_dir, f"mesh_{finename}.mp4"), mesh_video, fps=30)
 
-        # glb = postprocessing_utils.to_glb(outputs['gaussian'][0], outputs['mesh'][0], simplify=0.95)
-        # glb.export(os.path.join(output_dir, f"{prefix}_generated_mesh.glb"))
-        print(f"[SUCCESS] Exported {prefix} asset bundle.")
+        glb = postprocessing_utils.to_glb(outputs['gaussian'][0], outputs['mesh'][0], simplify=0.95)
+        glb.export(os.path.join(output_dir, f"mesh_{finename}.glb"))
+        print(f"[SUCCESS] Exported {finename} asset bundle.")
     except Exception as e:
-        print(f"[ERROR] Failed exporting asset frame bundles for {prefix}: {e}")
+        print(f"[ERROR] Failed exporting asset frame bundles for {finename}: {e}")
 
 # =====================================================================
 # SYSTEM MAIN ENTRY
@@ -141,7 +141,13 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     os.makedirs(args.output_dir, exist_ok=True)
     sketch_image = Image.open(args.sketch).convert("RGB")
-    
+    filename = os.path.splitext(os.path.basename(args.sketch))[0]
+    epoch = os.path.basename(args.checkpoint).split('_')[-1]
+
+    # Pre-calculate expected output paths to check for existence
+    run1_mesh_path = os.path.join(args.output_dir, f"mesh_pure_vanilla_{filename}.glb")
+    run2_mesh_path = os.path.join(args.output_dir, f"mesh_vanilla_plus_custom_tokens_{filename}.glb")
+
     # -----------------------------------------------------------------
     # RUN 1: THE TRUE STOCK BASELINE TEST
     # -----------------------------------------------------------------
@@ -151,9 +157,12 @@ if __name__ == "__main__":
     # FIX: Load first, do NOT chain .to(device) on the from_pretrained call!
     pipe = base_pipeline
     
-    print("\n--- Running Stock pipeline.run() ---")
-    vanilla_outputs = pipe.run(sketch_image, seed=42)
-    export_assets(vanilla_outputs, prefix="1_pure_vanilla", output_dir=args.output_dir)
+    if os.path.exists(run1_mesh_path):
+        print(f"\n[⏭️ SKIP] Found existing RUN 1 output at: {run1_mesh_path}")
+    else:
+        print("\n--- Running Stock pipeline.run() ---")
+        vanilla_outputs = pipe.run(sketch_image, seed=123)
+        export_assets(vanilla_outputs, finename=f"pure_vanilla_{filename}", output_dir=args.output_dir)
     
     # Extract tokens from the fresh vanilla graph *before* we delete it
     print("\nExtracting custom conditioning profile from pristine DINOv2 weights...")
@@ -181,12 +190,15 @@ if __name__ == "__main__":
     print("\n====================================================")
     print("RUN 2: STOCK VANILLA MODEL + CUSTOM SKETCH TOKENS")
     print("====================================================")
-    # Using the same vanilla pipeline instance before we inject LoRA anywhere near memory
-    print("Feeding custom conditioning dict directly into the clean, stock base model layers...")
-    reset_model_state(pipe)
-    torch.cuda.empty_cache()
-    san_check_outputs = run_manual_inference_flow(pipe, custom_cond)
-    export_assets(san_check_outputs, prefix="2_vanilla_plus_custom_tokens", output_dir=args.output_dir)
+    if os.path.exists(run2_mesh_path):
+        print(f"\n[⏭️ SKIP] Found existing RUN 2 output at: {run2_mesh_path}")
+    else:
+        # Using the same vanilla pipeline instance before we inject LoRA anywhere near memory
+        print("Feeding custom conditioning dict directly into the clean, stock base model layers...")
+        reset_model_state(pipe)
+        torch.cuda.empty_cache()
+        san_check_outputs = run_manual_inference_flow(pipe, custom_cond)
+        export_assets(san_check_outputs, finename=f"vanilla_plus_custom_tokens_{filename}", output_dir=args.output_dir)
     
     # -----------------------------------------------------------------
     # RUN 3: THE FINETUNED SKETCH LORA TEST
@@ -208,8 +220,8 @@ if __name__ == "__main__":
     
     print("\n--- Running Generation on Fine-Tuned System Stack ---")
     lora_outputs = run_manual_inference_flow(pipe, custom_cond)
-    export_assets(lora_outputs, prefix="3_fine_tuned_lora", output_dir=args.output_dir)
+    export_assets(lora_outputs, finename=f"fine_tuned_slat_{filename}_e{epoch}", output_dir=args.output_dir)
     
     print(f"\n[DIAGNOSTICS COMPLETE] Compare results inside: {args.output_dir}")
 
-#python sanity_check2.py --sketch "./dataloader/data/chair/sketches/8a4a3a90bc104f11b82cedd9b4e5ab6b_0.png" --checkpoint "./checkpoints/trellis_lora_epoch_10" --output_dir "./diagnostic_outputs"
+#python sanity_check2.py --sketch "./dataloader/data/chair/sketches/8a4a3a90bc104f11b82cedd9b4e5ab6b_5.png" --checkpoint "./checkpoints/trellis_lora_epoch_10" --output_dir "./diagnostic_outputs"

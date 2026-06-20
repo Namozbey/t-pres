@@ -19,16 +19,17 @@ TRAINING_CONFIG = {
     "image_size": 518,
     "batch_size": 2,
     "num_workers": 2,
+    "accumulation_steps": 2,
 
     # Optimization Hyperparameters
-    "epochs": 1000,
-    "learning_rate": 2e-5,
-    "weight_decay": 0.0,
+    "epochs": 500,
+    "learning_rate": 5e-5,
+    "weight_decay": 1e-4,
 
     # Architecture Settings
-    "lora_r": 128,
-    "lora_alpha": 128,
-    "lora_dropout": 0.0,
+    "lora_r": 32,
+    "lora_alpha": 16,
+    "lora_dropout": 0.05,
     "target_modules": "all-linear",
     # [
     #     "to_q", "to_kv", "to_qkv", "to_out",  # Attention

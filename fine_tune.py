@@ -1,9 +1,7 @@
 #fine_tune.py
 import os
-
-# This single line fixes BOTH the dense and sparse attention modules!
-# os.environ['ATTN_BACKEND'] = 'xformers' 
-# os.environ['SPCONV_ALGO'] = 'native'
+os.environ['ATTN_BACKEND'] = 'xformers' 
+os.environ['SPCONV_ALGO'] = 'native'
 
 import torch
 import torch.optim as optim
@@ -20,7 +18,7 @@ from config import TRAINING_CONFIG, WANDB_CONFIG
 # THE UNIFIED PRODUCTION TRAINING ENGINE
 # =====================================================================
 
-def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch):
+def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch, accumulation_steps):
     """
     Runs a single optimization pass matching native TRELLIS math precisely.
     """
@@ -30,8 +28,10 @@ def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch):
     num_batches = len(dataloader)
     sigma_min = getattr(model_wrapper, "sigma_min", 1e-5)
 
+    # 🛑 1. Clear gradients BEFORE the loop starts
+    optimizer.zero_grad()
+
     for batch_idx, batch in enumerate(dataloader):
-        optimizer.zero_grad()
 
         # ==========================================
         # 1. LOAD & NORMALIZE DATA
@@ -61,7 +61,7 @@ def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch):
         # ==========================================
         # 2. ALIGNED TIMESTEP SCHEDULER
         # ==========================================
-        if TRAINING_CONFIG["hardcode_timestep"]:
+        if TRAINING_CONFIG.get("hardcode_timestep", False):
             t = torch.ones(batch_size, device=device) * 0.5
         else:
             # Native TRELLIS Logit-Normal schedule setup
@@ -89,11 +89,18 @@ def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch):
             "pred abs mean:",
             predicted_velocity.abs().mean().item()
         )
+        
         # ==========================================
-        # 5. ALIGNED LOSS TARGET (get_v)
+        # 5. ALIGNED LOSS TARGET & TIMESTEP WEIGHTING
         # ==========================================
         target_velocity = (1.0 - sigma_min) * noise - x_0
-        loss = F.mse_loss(predicted_velocity, target_velocity)
+        
+        # 🛑 2. Calculate raw unreduced loss
+        raw_loss = F.mse_loss(predicted_velocity, target_velocity, reduction='none')
+        
+        # 🛑 3. Apply Timestep Weighting (Prioritize t=0 structural formation)
+        weight = 1 #torch.exp(-3.0 * t_broadcast)
+        weighted_loss = (raw_loss * weight).mean()
 
         print(
             "target abs mean:",
@@ -101,32 +108,41 @@ def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch):
         )
 
         # ==========================================
-        # 6. BACKWARD STEP
+        # 6. GRADIENT ACCUMULATION BACKWARD STEP
         # ==========================================
+        # 🛑 4. Divide the loss by the number of accumulation steps
+        loss = weighted_loss / accumulation_steps
         loss.backward()
 
         total_grad = 0.0
-
         for name, p in model_wrapper.lora_dit.named_parameters():
             if p.requires_grad and p.grad is not None:
                 total_grad += p.grad.abs().mean().item()
 
         print("total grad:", total_grad)
 
+        # 🛑 5. Only step the optimizer after N batches (or on the final batch)
+        if ((batch_idx + 1) % accumulation_steps == 0) or (batch_idx + 1 == len(dataloader)):
+            torch.nn.utils.clip_grad_norm_(model_wrapper.lora_dit.parameters(), max_norm=1.0)
+            optimizer.step()
+            optimizer.zero_grad() # Clear gradients for the next accumulation cycle
 
-        torch.nn.utils.clip_grad_norm_(model_wrapper.lora_dit.parameters(), max_norm=1.0)
-        optimizer.step()
-
-        # Logging
+        # ==========================================
+        # 7. LOGGING
+        # ==========================================
         global_step = (current_epoch - 1) * num_batches + batch_idx
+        
+        # 🛑 6. Multiply the printed/logged loss back by accumulation_steps so it reads normally
+        display_loss = loss.item() * accumulation_steps
+        
         wandb.log({
-            "train/batch_loss": loss.item(),
+            "train/batch_loss": display_loss,
             "train/epoch": current_epoch,
             "train/global_step": global_step
         })
         
-        print(f"  → Batch [{batch_idx+1}/{num_batches}] | Loss: {loss.item():.5f}")
-        epoch_loss += loss.item()
+        print(f"  → Batch [{batch_idx+1}/{num_batches}] | Loss: {display_loss:.5f}")
+        epoch_loss += display_loss
         
     return epoch_loss / num_batches
 
@@ -140,7 +156,10 @@ def main_train_pipeline():
     Main execution wrapper entirely controlled by config.py
     """
     device = TRAINING_CONFIG["device"]
+    # 🛑 Grab accumulation steps from config, default to 4 if not set
+    accumulation_steps = TRAINING_CONFIG.get("accumulation_steps", 4)
     print(f"System Execution Backend: {device.upper()}")
+    print(f"Gradient Accumulation Steps: {accumulation_steps}")
 
     # 1. INITIALIZE MASTER W&B RUN VIA CONFIG
     wandb.init(
@@ -159,6 +178,12 @@ def main_train_pipeline():
         lr=TRAINING_CONFIG["learning_rate"], 
         weight_decay=TRAINING_CONFIG["weight_decay"]
     )
+
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+    #     optimizer, 
+    #     T_max=TRAINING_CONFIG["epochs"], 
+    #     eta_min=5e-7
+    # )
     
     print("\n--- Constructing Active Production Data Layer ---")
     dataset = SketchMeshDataset(
@@ -177,15 +202,20 @@ def main_train_pipeline():
     )
     
     epochs = TRAINING_CONFIG["epochs"]
+    epoch_losses = []
     print(f"\nStarting training loop for {epochs} epochs...")
     
     for epoch in range(1, epochs + 1):
         print(f"\n[Epoch {epoch}/{epochs}]")
         
-        # FIXED: Passed current_epoch into function parameters explicitly
-        avg_loss = train_epoch(trainable_architecture, dataloader, optimizer, device, current_epoch=epoch)
-        
-        wandb.log({"train/epoch_avg_loss": avg_loss, "epoch": epoch})
+        # 🛑 Pass accumulation_steps into train_epoch
+        avg_loss = train_epoch(trainable_architecture, dataloader, optimizer, device, current_epoch=epoch, accumulation_steps=accumulation_steps)
+        epoch_losses.append(avg_loss)
+
+        # scheduler.step()
+        # current_lr = scheduler.get_last_lr()[0]
+
+        wandb.log({"train/epoch_avg_loss": avg_loss, "epoch": epoch  }) # "train/learning_rate": current_lr
         
         # Save checkpoints safely based on configuration parameters
         if epoch % TRAINING_CONFIG["save_every_n_epochs"] == 0 or epoch == epochs:
@@ -194,6 +224,7 @@ def main_train_pipeline():
             print(f"--> Checkpoint: Saving trained adapters to {checkpoint_path}...")
             trainable_architecture.lora_dit.save_pretrained(checkpoint_path)
 
+    wandb.log({"avg_loss": torch.tensor(epoch_losses, dtype=torch.float).mean().item()})
     wandb.finish()
     print("\nTraining execution completed successfully.")
 
