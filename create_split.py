@@ -50,9 +50,9 @@ for uid, views in uid_to_views.items():
 # ---------------------------------------
 # STEP 3: save
 # ---------------------------------------
-os.makedirs(ROOT, exist_ok=True)
+os.makedirs(cat_dir, exist_ok=True)
 
-with open(os.path.join(ROOT, "split.json"), "w") as f:
+with open(os.path.join(cat_dir, "split.json"), "w") as f:
     json.dump(split_dict, f, indent=4)
 
 print("Created mesh-based split.json")
