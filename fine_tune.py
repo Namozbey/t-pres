@@ -66,8 +66,14 @@ def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch, acc
             t = torch.ones(batch_size, device=device) * 0.5
         else:
             # Native TRELLIS Logit-Normal schedule setup
-            mean, std = 0.0, 1.0
-            t = torch.sigmoid(torch.randn(batch_size, device=device) * std + mean)
+            progress = progress = current_epoch / TRAINING_CONFIG["epochs"]
+
+            mix = min(progress / 0.5, 1.0)
+
+            u = torch.rand(batch_size, device=device)
+            ln = torch.sigmoid(torch.randn(batch_size, device=device))
+
+            t = (1 - mix) * ln + mix * u
 
         timestamps.append(t.item())
         t_broadcast = t.view(batch_size, 1, 1, 1, 1)
