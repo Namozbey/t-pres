@@ -145,8 +145,8 @@ if __name__ == "__main__":
     epoch = os.path.basename(args.checkpoint).split('_')[-1]
 
     # Pre-calculate expected output paths to check for existence
-    run1_mesh_path = os.path.join(args.output_dir, f"mesh_pure_vanilla_{filename}.glb")
-    run2_mesh_path = os.path.join(args.output_dir, f"mesh_vanilla_plus_custom_tokens_{filename}.glb")
+    run1_mesh_path = os.path.join(args.output_dir, f"mesh_pure_vanilla_{filename}.mp4")
+    run2_mesh_path = os.path.join(args.output_dir, f"mesh_vanilla_plus_custom_tokens_{filename}.mp4")
 
     # -----------------------------------------------------------------
     # RUN 1: THE TRUE STOCK BASELINE TEST

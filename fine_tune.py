@@ -4,6 +4,7 @@ os.environ['ATTN_BACKEND'] = 'xformers'
 os.environ['SPCONV_ALGO'] = 'native'
 
 import torch
+import numpy as np
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -18,7 +19,7 @@ from config import TRAINING_CONFIG, WANDB_CONFIG
 # THE UNIFIED PRODUCTION TRAINING ENGINE
 # =====================================================================
 
-def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch, accumulation_steps):
+def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch, accumulation_steps, timestamps = []):
     """
     Runs a single optimization pass matching native TRELLIS math precisely.
     """
@@ -68,6 +69,7 @@ def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch, acc
             mean, std = 0.0, 1.0
             t = torch.sigmoid(torch.randn(batch_size, device=device) * std + mean)
 
+        timestamps.append(t.item())
         t_broadcast = t.view(batch_size, 1, 1, 1, 1)
 
         # ==========================================
@@ -99,7 +101,7 @@ def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch, acc
         raw_loss = F.mse_loss(predicted_velocity, target_velocity, reduction='none')
         
         # 🛑 3. Apply Timestep Weighting (Prioritize t=0 structural formation)
-        weight = 1 #torch.exp(-3.0 * t_broadcast)
+        weight = torch.exp(-2.0 * t_broadcast)
         weighted_loss = (raw_loss * weight).mean()
 
         print(
@@ -138,7 +140,7 @@ def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch, acc
         wandb.log({
             "train/batch_loss": display_loss,
             "train/epoch": current_epoch,
-            "train/global_step": global_step
+            "train/global_step": global_step,
         })
         
         print(f"  → Batch [{batch_idx+1}/{num_batches}] | Loss: {display_loss:.5f}")
@@ -205,7 +207,7 @@ def validate_epoch(model_wrapper, dataloader, device, current_epoch):
 
             total_loss += loss.item()
 
-            print(f"[VAL] Batch {batch_idx+1}/{num_batches} | Loss: {loss.item():.5f}")
+            print(f"[VAL] Batch {batch_idx+1}/{num_batches} | batch_loss: {loss.item():.5f}")
 
     avg_loss = total_loss / num_batches
 
@@ -231,6 +233,7 @@ def main_train_pipeline():
     accumulation_steps = TRAINING_CONFIG.get("accumulation_steps", 4)
     print(f"System Execution Backend: {device.upper()}")
     print(f"Gradient Accumulation Steps: {accumulation_steps}")
+    timestamps = []
 
     # 1. INITIALIZE MASTER W&B RUN VIA CONFIG
     wandb.init(
@@ -250,11 +253,11 @@ def main_train_pipeline():
         weight_decay=TRAINING_CONFIG["weight_decay"]
     )
 
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-    #     optimizer, 
-    #     T_max=TRAINING_CONFIG["epochs"], 
-    #     eta_min=5e-7
-    # )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, 
+        T_max=TRAINING_CONFIG["epochs"], 
+        eta_min=5e-7
+    )
     
     print("\n--- Constructing Active Production Data Layer ---")
     dataset = SketchMeshDataset(
@@ -298,7 +301,7 @@ def main_train_pipeline():
         print(f"\n[Epoch {epoch}/{epochs}]")
         
         # 🛑 Pass accumulation_steps into train_epoch
-        avg_loss = train_epoch(trainable_architecture, dataloader, optimizer, device, current_epoch=epoch, accumulation_steps=accumulation_steps)
+        avg_loss = train_epoch(trainable_architecture, dataloader, optimizer, device, current_epoch=epoch, accumulation_steps=accumulation_steps, timestamps=timestamps)
         val_loss = validate_epoch(
             trainable_architecture,
             val_dataloader,
@@ -308,14 +311,15 @@ def main_train_pipeline():
         train_losses.append(avg_loss)
         val_losses.append(val_loss)
 
-        # scheduler.step()
-        # current_lr = scheduler.get_last_lr()[0]
+        scheduler.step()
+        current_lr = scheduler.get_last_lr()[0]
 
         wandb.log({
             "train/epoch_avg_loss": avg_loss, 
             "val/epoch_loss": val_loss, 
-            "epoch": epoch  
-        }) # "train/learning_rate": current_lr
+            "epoch": epoch,
+            "train/learning_rate": current_lr
+        })
         
         # Save checkpoints safely based on configuration parameters
         if epoch % TRAINING_CONFIG["save_every_n_epochs"] == 0 or epoch == epochs:
@@ -329,6 +333,8 @@ def main_train_pipeline():
         "avg_val_loss": torch.tensor(val_losses, dtype=torch.float).mean().item()
         })
     wandb.finish()
+    ts = np.array(timestamps)
+    np.save('timestamps.npy', ts)
     print("\nTraining execution completed successfully.")
 
 if __name__ == "__main__":

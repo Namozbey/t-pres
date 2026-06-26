@@ -53,8 +53,8 @@ You can run the full pipeline directly from the terminal using `render.py`.
 # Basic usage with default parameters (Chairs)
 python -m dataloader.render
 
-# Custom dataset generation (e.g., generating 6 views for 100 bottles)
-python -m dataloader.render --category bottle --download_limit 100 --num_views 6
+# Custom dataset generation (e.g., generating 6 views for 100 chair)
+python -m dataloader.render --category chair --download_limit 100 --num_views 6
 
 ```
 
