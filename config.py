@@ -16,11 +16,11 @@ TRAINING_CONFIG = {
 
     # Data Settings
     "data_root": "./dataloader/data",
-    "category": "sofa",
+    "category": "chair",
     "image_size": 518,
-    "batch_size": 1,
+    "batch_size": 2,
     "num_workers": 2,
-    "accumulation_steps": 2,
+    "accumulation_steps": 5,
 
     # Optimization Hyperparameters
     "epochs": 500,

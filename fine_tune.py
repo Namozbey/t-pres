@@ -75,7 +75,7 @@ def train_epoch(model_wrapper, dataloader, optimizer, device, current_epoch, acc
 
             t = (1 - mix) * ln + mix * u
 
-        timestamps.append(t.item())
+        timestamps.extend(t.detach().cpu().view(-1).tolist())
         t_broadcast = t.view(batch_size, 1, 1, 1, 1)
 
         # ==========================================
@@ -239,7 +239,6 @@ def main_train_pipeline():
     accumulation_steps = TRAINING_CONFIG.get("accumulation_steps", 4)
     print(f"System Execution Backend: {device.upper()}")
     print(f"Gradient Accumulation Steps: {accumulation_steps}")
-    timestamps = []
 
     # 1. INITIALIZE MASTER W&B RUN VIA CONFIG
     wandb.init(
@@ -301,6 +300,7 @@ def main_train_pipeline():
     epochs = TRAINING_CONFIG["epochs"]
     train_losses = []
     val_losses = []
+    timestamps = []
     print(f"\nStarting training loop for {epochs} epochs...")
     
     for epoch in range(1, epochs + 1):
