@@ -75,7 +75,7 @@ def generate_sketch_pairs(glb_path, num_views=3):
     
     # Orbit parameters
     azimuths = np.linspace(np.pi / 9, 2 * np.pi + np.pi / 9, num_views, endpoint=False)
-    elevations = np.linspace(-np.pi / 6, np.pi / 10, num_views, endpoint=False) # -np.pi / 8  # Camera looking slightly down
+    elevations = np.linspace(-np.pi / 5, -np.pi / 18, num_views, endpoint=False) # -np.pi / 8  # Camera looking slightly down
     radius = 2.0           # Distance from the chair
 
     rgb_images = []
