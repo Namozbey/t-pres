@@ -10,6 +10,7 @@ __pycache__/
 # Project data and generated files
 dataloader/data/
 *.glb
+*.ply
 *.png
 checkpoints
 diagnostic_visuals*
