@@ -1,3 +1,7 @@
 [submodule "TRELLIS"]
 	path = TRELLIS
 	url = https://github.com/microsoft/TRELLIS.git
+
+[submodule "Depth-Anything-V3"]
+	path = Depth-Anything-V3
+	url = https://github.com/DepthAnything/Depth-Anything-V3.git
