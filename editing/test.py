@@ -1,10 +1,10 @@
-from alignpc import align_pcs_sim3
-from mesh2pc import sample_mesh_surface
+from editing.alignpc import align_pcs_sim3
+from editing.mesh2pc import sample_mesh_surface
 
 
 def run_alignment(mesh, pc):
     sample_mesh_surface(mesh_path=mesh)
-    M = align_pcs_sim3(source_ply=pc, target_ply="output/generated.ply")
+    M = align_pcs_sim3(source_ply=pc, target_ply="editing/output/generated.ply")
     return M
 
 if __name__ == "__main__":

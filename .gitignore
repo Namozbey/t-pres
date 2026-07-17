@@ -9,6 +9,7 @@ __pycache__/
 
 # Project data and generated files
 dataloader/data/
+state/
 *.glb
 *.ply
 *.png

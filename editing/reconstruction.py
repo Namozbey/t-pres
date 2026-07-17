@@ -4,11 +4,158 @@ import numpy as np
 import open3d as o3d
 from rembg import remove, new_session
 from PIL import Image
+import itertools
+import copy
 
 # ==========================================================
 # Initialize the AI session once globally to force GPU usage
 # ==========================================================
 gpu_session = new_session(providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
+
+def get_trellis_latent_mask(transformed_bb_dict, trellis_bounds=(-0.5, 0.5)):
+    """
+    Takes a bounding box (already transformed into Trellis physical space) and 
+    normalizes it relative to the Trellis 1:1:1 global canonical workspace,
+    accounting for the inverted Depth axis in Trellis.
+    """
+    global_min = trellis_bounds[0]
+    global_max = trellis_bounds[1]
+    global_range = global_max - global_min
+    
+    part_min = np.array(transformed_bb_dict["min"])
+    part_max = np.array(transformed_bb_dict["max"])
+    
+    norm_min = (part_min - global_min) / global_range
+    norm_max = (part_max - global_min) / global_range
+    
+    norm_min = np.clip(norm_min, 0.0, 1.0)
+    norm_max = np.clip(norm_max, 0.0, 1.0)
+    
+    # 4. Map physical space -> Trellis Latent Space [z, y, x]
+    # =======================================================
+    # INVERT THE DEPTH: Trellis Y goes 0 (Front) -> 1 (Back)
+    # Our Open3D Z goes 0 (Back) -> 1 (Front)
+    # We apply `1.0 - value` to align them!
+    
+    trellis_min = [
+        norm_min[1],            # Latent Z (Up)    <- Open3D Y
+        1.0 - norm_min[2],      # Latent Y (Depth) <- INVERTED Open3D Z
+        norm_min[0]             # Latent X (Right) <- Open3D X
+    ]
+    
+    trellis_max = [
+        norm_max[1],  
+        1.0 - norm_max[2],      # Latent Y (Depth) <- INVERTED Open3D Z 
+        norm_max[0]   
+    ]
+    
+    # 5. Safety check (This automatically fixes the inverted min/max order)
+    final_min = [float(min(a, b)) for a, b in zip(trellis_min, trellis_max)]
+    final_max = [float(max(a, b)) for a, b in zip(trellis_min, trellis_max)]
+    
+    return {
+        "min": final_min,
+        "max": final_max
+    }
+
+def transform_bounding_box(changed_pcd, M, padding=0.02):
+    """
+    Transforms raw 3D points into Trellis space, calculates the tightest AABB, 
+    and applies an optional padding to account for ICP alignment slop.
+    
+    Parameters:
+    - padding: Absolute value to expand the bounding box in all directions 
+               (e.g., 0.02 means adding 2% if the global space is 1.0)
+    """
+    if changed_pcd is None or len(changed_pcd.points) == 0:
+        return {"min": [], "max": []}
+
+    # 1. Deep copy the point cloud to protect the original data
+    pcd_transformed = copy.deepcopy(changed_pcd)
+
+    # 2. Apply the 4x4 Transformation Matrix to physically move the points
+    pcd_transformed.transform(M)
+
+    # 3. Get the absolute minimum and maximum XYZ bounds of the points
+    new_min = pcd_transformed.get_min_bound()
+    new_max = pcd_transformed.get_max_bound()
+
+    # 4. Apply the padding (expand outward in all 6 directions)
+    # Subtracting from min pushes the floor/left/back outward
+    # Adding to max pushes the ceiling/right/front outward
+    new_min -= padding
+    new_max += padding
+
+    return {
+        "min": new_min.tolist(),
+        "max": new_max.tolist()
+    }
+
+def visualize_bounding_box(ply_path, bb_dict, save_image_path=None):
+    """
+    Loads a point cloud and draws either an Oriented or Axis-Aligned bounding box.
+    Automatically detects the box type based on the dictionary keys.
+    """
+    # 1. Load the Point Cloud
+    if not os.path.exists(ply_path):
+        raise FileNotFoundError(f"Could not find point cloud at: {ply_path}")
+        
+    pcd = o3d.io.read_point_cloud(ply_path)
+    
+    if len(pcd.points) == 0:
+        print("Warning: The point cloud is empty!")
+        return
+
+    # 2. Parse the Bounding Box Dictionary
+    bbox = None
+    
+    # CASE A: It's an Oriented Bounding Box (from extract_changes)
+    if "corners" in bb_dict and len(bb_dict["corners"]) == 8:
+        corners = np.array(bb_dict["corners"])
+        
+        # create_from_points finds the bounding geometry. Since we feed it exactly 
+        # the 8 corners of a box, it perfectly reconstructs the original OBB.
+        bbox = o3d.geometry.OrientedBoundingBox.create_from_points(o3d.utility.Vector3dVector(corners))
+        
+        # Color it GREEN to signify it is a tight OBB
+        bbox.color = (0, 1, 0) 
+        print("Visualizing: Oriented Bounding Box (Green)")
+
+    # CASE B: It's an Axis-Aligned Bounding Box (from transform_bounding_box)
+    elif "min" in bb_dict and "max" in bb_dict and len(bb_dict["min"]) == 3:
+        min_bound = np.array(bb_dict["min"])
+        max_bound = np.array(bb_dict["max"])
+        
+        bbox = o3d.geometry.AxisAlignedBoundingBox(min_bound, max_bound)
+        
+        # Color it RED to signify it is a Trellis-space AABB
+        bbox.color = (1, 0, 0)
+        print("Visualizing: Axis-Aligned Bounding Box (Red)")
+        
+    else:
+        print("Warning: Invalid bb_dict format. Expected 'corners' or 'min'/'max'.")
+        return
+
+    # 3. Handle Rendering (Interactive vs File Save)
+    if save_image_path:
+        print(f"Rendering scene to {save_image_path}...")
+        
+        vis = o3d.visualization.Visualizer()
+        vis.create_window(visible=False) 
+        
+        vis.add_geometry(pcd)
+        vis.add_geometry(bbox)
+        
+        vis.poll_events()
+        vis.update_renderer()
+        vis.capture_screen_image(save_image_path)
+        vis.destroy_window()
+        
+        print("Visualization saved successfully.")
+        
+    else:
+        print("Opening interactive viewer. Close the window to continue script execution.")
+        o3d.visualization.draw_geometries([pcd, bbox])
 
 def generate_pcd(rgb_image, depth_map, mask, fx, fy, cx, cy):
     """
@@ -35,19 +182,18 @@ def generate_pcd(rgb_image, depth_map, mask, fx, fy, cx, cy):
     
     # Clean and orient
     if len(pcd.points) > 0:
-        pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=40, std_ratio=1.5)
+        pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=0.5)
         pcd.transform([[1,  0,  0, 0],
                        [0, -1,  0, 0],
                        [0,  0, -1, 0],
                        [0,  0,  0, 1]])
     return pcd
 
-
-def extract_changes(sk1_path, sk2_path, rgb_path, depth_map, fx, fy, cx, cy, padding=5):
+def extract_changes(sk1_path, sk2_path, rgb_path, depth_map, fx, fy, cx, cy, padding=3):
     """
-    Compares two sketches to find the changed region, extracts that region 
-    from both the 2D image and the 3D point cloud, saves the assets, 
-    and returns the 3D Bounding Box of the changed part.
+    Compares two sketches to find the precise contour of the changed region, 
+    extracts that exact blob from both the 2D image and the 3D point cloud, 
+    saves the assets, and returns the 3D Bounding Box of the changed part.
     """
     # ==========================================
     # 0. Load Main RGB Image & Setup Directories
@@ -58,7 +204,6 @@ def extract_changes(sk1_path, sk2_path, rgb_path, depth_map, fx, fy, cx, cy, pad
         
     rgb_image = cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB)
     
-    # Ensure the output directory exists
     save_dir = "editing/output"
     os.makedirs(save_dir, exist_ok=True)
 
@@ -72,36 +217,40 @@ def extract_changes(sk1_path, sk2_path, rgb_path, depth_map, fx, fy, cx, cy, pad
     sk1 = cv2.resize(sk1, (w, h))
     sk2 = cv2.resize(sk2, (w, h))
 
-    # Blur to forgive minor pixel shifts
     sk1_blur = cv2.GaussianBlur(sk1, (5, 5), 0)
     sk2_blur = cv2.GaussianBlur(sk2, (5, 5), 0)
 
     diff = cv2.absdiff(sk1_blur, sk2_blur)
     _, diff_thresh = cv2.threshold(diff, 30, 255, cv2.THRESH_BINARY)
 
-    # Clean up thin lines with morphology
     kernel = np.ones((5, 5), np.uint8)
     diff_clean = cv2.morphologyEx(diff_thresh, cv2.MORPH_OPEN, kernel)
-    diff_clean = cv2.dilate(diff_clean, kernel, iterations=2)
-
-    # Get bounding box coordinates
-    y_coords, x_coords = np.where(diff_clean > 0)
     
-    if len(y_coords) == 0:
+    # Check if we actually found any differences before proceeding
+    if np.sum(diff_clean) == 0:
         print("No significant differences found between the sketches!")
-        return {"min": [], "max": []}
-
-    # Apply padding securely within image bounds
-    y_min = max(0, y_coords.min() - padding)
-    y_max = min(h, y_coords.max() + padding)
-    x_min = max(0, x_coords.min() - padding)
-    x_max = min(w, x_coords.max() + padding)
-
-    bbox_mask = np.zeros((h, w), dtype=bool)
-    bbox_mask[y_min:y_max, x_min:x_max] = True
+        return {"min": [], "max": []}, None
 
     # ==========================================
-    # 2. Extract Base Object via AI
+    # 2. NEW: Create Precise Filled Contour Mask
+    # ==========================================
+    # Find the outer boundaries of the sketch differences
+    contours, _ = cv2.findContours(diff_clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    # Create an empty mask and fill the contours to make a solid 2D blob
+    exact_mask_uint8 = np.zeros((h, w), dtype=np.uint8)
+    cv2.drawContours(exact_mask_uint8, contours, -1, 255, thickness=cv2.FILLED)
+
+    # Dilate the solid blob by the `padding` amount (using a circle for smooth edges)
+    if padding > 0:
+        pad_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (padding * 2 + 1, padding * 2 + 1))
+        exact_mask_uint8 = cv2.dilate(exact_mask_uint8, pad_kernel, iterations=1)
+
+    # Convert back to a boolean mask for array slicing
+    exact_mask = exact_mask_uint8 > 0
+
+    # ==========================================
+    # 3. Extract Base Object via AI
     # ==========================================
     img_pil = Image.fromarray(rgb_image)
     rgba_output = remove(img_pil, session=gpu_session)
@@ -110,304 +259,40 @@ def extract_changes(sk1_path, sk2_path, rgb_path, depth_map, fx, fy, cx, cy, pad
     base_mask = rgba_array[:, :, 3] > 128
 
     # ==========================================
-    # 3. Save the 2D Images
+    # 4. Save the 2D Images using Precise Mask
     # ==========================================
     rgba_output.save(os.path.join(save_dir, "bg_free_full.png"))
 
     changed_rgba = rgba_array.copy()
-    changed_rgba[~bbox_mask, 3] = 0 
+    changed_rgba[~exact_mask, 3] = 0  # Apply the precise blob mask!
     Image.fromarray(changed_rgba).save(os.path.join(save_dir, "changed_part.png"))
 
     # ==========================================
-    # 4. Generate & Save Point Clouds
+    # 5. Generate & Save Point Clouds
     # ==========================================
     full_pcd = generate_pcd(rgb_image, depth_map, base_mask, fx, fy, cx, cy)
     o3d.io.write_point_cloud(os.path.join(save_dir, "bg_free_full_pc.ply"), full_pcd, write_ascii=False)
 
-    combined_mask = base_mask & bbox_mask
+    combined_mask = base_mask & exact_mask
     changed_pcd = generate_pcd(rgb_image, depth_map, combined_mask, fx, fy, cx, cy)
     o3d.io.write_point_cloud(os.path.join(save_dir, "changed_part_pc.ply"), changed_pcd, write_ascii=False)
 
     # ==========================================
-    # 5. Calculate and Return 3D Bounding Box
+    # 6. Calculate and Return Oriented Bounding Box
     # ==========================================
     if len(changed_pcd.points) == 0:
         print("Warning: The bounding box contained no 3D points.")
-        return {"min": [], "max": []}
+        return {"corners": []}, full_pcd
 
-    # Open3D bounds return as numpy arrays, .tolist() converts them for standard dict format
+    # Get the tightest possible oriented box around the points
+    obb = changed_pcd.get_oriented_bounding_box()
+    
+    # Extract the 8 vertices of this oriented box
+    corners = np.asarray(obb.get_box_points())
+
     bb_dict = {
-        "min": changed_pcd.get_min_bound().tolist(),
-        "max": changed_pcd.get_max_bound().tolist()
+        "corners": corners.tolist()
     }
     
     print(f"Pipeline complete. Files saved to '{save_dir}'.")
-    return bb_dict
-
-def reconstruct_with_rembg(rgb_image, depth_map, fx, fy, cx, cy):
-    """
-    Uses AI to perfectly mask the object, ignoring shadows, 
-    saves the transparent 2D image, and reconstructs the oriented 3D point cloud.
-    """
-    img_pil = Image.fromarray(rgb_image)
-    
-    # Pass the pre-loaded GPU session to the remove function
-    rgba_output = remove(img_pil, session=gpu_session) 
-    
-    rgba_output.save("filtered_image_debug.png")
-    rgba_array = np.array(rgba_output)
-    
-    alpha_channel = rgba_array[:, :, 3]
-    object_mask = alpha_channel > 128
-
-    h, w = depth_map.shape
-    u, v = np.meshgrid(np.arange(w), np.arange(h))
-
-    u_filtered = u[object_mask]
-    v_filtered = v[object_mask]
-    z_filtered = depth_map[object_mask]
-    colors_filtered = rgb_image[object_mask] / 255.0
-
-    x = (u_filtered - cx) * z_filtered / fx
-    y = (v_filtered - cy) * z_filtered / fy
-    z = z_filtered
-    points = np.stack((x, y, z), axis=-1)
-
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(points)
-    pcd.colors = o3d.utility.Vector3dVector(colors_filtered)
-    pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
-
-    pcd.transform([[1,  0,  0, 0],
-                   [0, -1,  0, 0],
-                   [0,  0, -1, 0],
-                   [0,  0,  0, 1]])
-
-    o3d.io.write_point_cloud("bg_free_pc.ply", pcd, write_ascii=False)
-
-    return pcd
-
-def save_pointcloud_diff(
-    rgb: np.ndarray,            
-    depth: np.ndarray,          
-    diff_mask: np.ndarray,      
-    fx: float, fy: float, cx: float, cy: float,
-    out_path: str = "cloud_dense_S.ply",
-    depth_min: float = 0.1,
-    depth_max: float = 50.0,
-    stride: int = 4,
-    apply_open3d_flip: bool = True,
-    z_margin: float = 0.05  # Use this to shave off the background wall if it bleeds in!
-) -> None:
-    
-    # --- STEP 1: Strict 2D Isolation (Find only the 'S') ---
-    if len(diff_mask.shape) > 2:
-        diff_mask = cv2.cvtColor(diff_mask, cv2.COLOR_BGR2GRAY)
-        
-    diff_mask = cv2.resize(diff_mask, (depth.shape[1], depth.shape[0]), interpolation=cv2.INTER_NEAREST)
-    
-    # High threshold to kill faint noise/letters
-    _, thresh = cv2.threshold(diff_mask, 0, 255, cv2.THRESH_BINARY)
-
-    # Find the largest clump of differences (The 'S')
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        print("No differences found. Aborting.")
-        return
-
-    largest_contour = max(contours, key=cv2.contourArea)
-    clean_mask = np.zeros_like(thresh)
-    cv2.drawContours(clean_mask, [largest_contour], -1, 255, thickness=cv2.FILLED)
-
-    # Setup the strided grid
-    H, W = depth.shape
-    u = np.arange(0, W, stride)
-    v = np.arange(0, H, stride)
-    uu, vv = np.meshgrid(u, v)
-    z = depth[vv, uu].astype(np.float32)
-
-    # --- STEP 2: Calculate 3DBB strictly from the 'S' mask ---
-    inside_s = clean_mask[vv, uu] > 0
-    valid_s = (z > depth_min) & (z < depth_max) & np.isfinite(z) & inside_s
-
-    x_s = (uu[valid_s] - cx) * z[valid_s] / fx
-    y_s = (vv[valid_s] - cy) * z[valid_s] / fy
-    z_s = z[valid_s]
-
-    if len(x_s) == 0:
-        print("No valid depth points inside the mask. Aborting.")
-        return
-
-    # Define the 3DBB, applying the margin to the back (max_z)
-    min_x, max_x = x_s.min(), x_s.max()
-    min_y, max_y = y_s.min(), y_s.max()
-    min_z = z_s.min()
-    max_z = z_s.max() - z_margin  
-
-    print(f"Computed Strict 3DBB:")
-    print(f"X: {min_x:.3f} -> {max_x:.3f}")
-    print(f"Y: {min_y:.3f} -> {max_y:.3f}")
-    print(f"Z: {min_z:.3f} -> {max_z:.3f} (Margin: {z_margin})")
-
-    # --- STEP 3: Reconstruct the FULL scene and apply 3DBB ---
-    valid_full = (z > depth_min) & (z < depth_max) & np.isfinite(z)
-
-    x_full = (uu - cx) * z / fx
-    y_full = (vv - cy) * z / fy
-
-    in_3dbb = (
-        (x_full >= min_x) & (x_full <= max_x) &
-        (y_full >= min_y) & (y_full <= max_y) &
-        (z >= min_z) & (z <= max_z)
-    )
-
-    final_mask = valid_full & in_3dbb
-
-    # Extract final points and colors
-    points = np.stack((x_full, y_full, z), axis=-1)[final_mask]
-    
-    rgb_resized = cv2.resize(rgb, (W, H), interpolation=cv2.INTER_NEAREST)
-    colors = (rgb_resized[vv, uu][final_mask].astype(np.float32) / 255.0)
-
-    if len(points) == 0:
-        print("No points passed the 3DBB filter. Aborting.")
-        return
-
-    # --- STEP 4: Save to Open3D ---
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(points.astype(np.float64))
-    pcd.colors = o3d.utility.Vector3dVector(colors.astype(np.float64))
-
-    if apply_open3d_flip:
-        pcd.transform([[1, 0, 0, 0],
-                       [0, -1, 0, 0],
-                       [0, 0, -1, 0],
-                       [0, 0, 0, 1]])
-
-    o3d.io.write_point_cloud(out_path, pcd, write_ascii=False)
-    print(f"Successfully isolated the dense volume! Saved {len(points):,} points to {out_path}")
-
-
-def get_3dbb(
-    depth: np.ndarray,          
-    diff_mask: np.ndarray,      
-    fx: float, fy: float, cx: float, cy: float,
-    depth_min: float = 0.1,
-    depth_max: float = 50.0,
-    stride: int = 4
-) -> dict:
-    
-    # 1. Clean and Isolate the Mask (Threshold at 30)
-    if len(diff_mask.shape) > 2:
-        diff_mask = cv2.cvtColor(diff_mask, cv2.COLOR_BGR2GRAY)
-        
-    diff_mask = cv2.resize(diff_mask, (depth.shape[1], depth.shape[0]), interpolation=cv2.INTER_NEAREST)
-    _, thresh = cv2.threshold(diff_mask, 0, 255, cv2.THRESH_BINARY)
-
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        print("No differences found.")
-        return None
-
-    largest_contour = max(contours, key=cv2.contourArea)
-    clean_mask = np.zeros_like(thresh)
-    cv2.drawContours(clean_mask, [largest_contour], -1, 255, thickness=cv2.FILLED)
-
-    # 2. Setup the grid
-    H, W = depth.shape
-    u = np.arange(0, W, stride)
-    v = np.arange(0, H, stride)
-    uu, vv = np.meshgrid(u, v)
-    z = depth[vv, uu].astype(np.float32)
-
-    # 3. Calculate Global Bounds (The Whole Scene)
-    valid_depth = (z > depth_min) & (z < depth_max) & np.isfinite(z)
-    
-    x_full = (uu[valid_depth] - cx) * z[valid_depth] / fx
-    y_full = (vv[valid_depth] - cy) * z[valid_depth] / fy
-    z_full = z[valid_depth]
-    
-    if len(x_full) == 0:
-        return None
-        
-    global_min_x, global_max_x = x_full.min(), x_full.max()
-    global_min_y, global_max_y = y_full.min(), y_full.max()
-    global_min_z, global_max_z = z_full.min(), z_full.max()
-
-    # 4. Calculate Local Bounds (Strictly the 'S')
-    inside_s = clean_mask[vv, uu] > 0
-    valid_s = valid_depth & inside_s
-
-    x_s = (uu[valid_s] - cx) * z[valid_s] / fx
-    y_s = (vv[valid_s] - cy) * z[valid_s] / fy
-    z_s = z[valid_s]
-
-    if len(x_s) == 0:
-        return None
-
-    min_x, max_x = x_s.min(), x_s.max()
-    min_y, max_y = y_s.min(), y_s.max()
-    min_z, max_z = z_s.min(), z_s.max()
-    
-    # 5. Normalize against the global scene [0 to 1]
-    # (Adding 1e-6 prevents a division-by-zero crash if a dimension is perfectly flat)
-    norm_min_x = (min_x - global_min_x) / (global_max_x - global_min_x + 1e-6)
-    norm_max_x = (max_x - global_min_x) / (global_max_x - global_min_x + 1e-6)
-    
-    norm_min_y = (min_y - global_min_y) / (global_max_y - global_min_y + 1e-6)
-    norm_max_y = (max_y - global_min_y) / (global_max_y - global_min_y + 1e-6)
-    
-    norm_min_z = (min_z - global_min_z) / (global_max_z - global_min_z + 1e-6)
-    norm_max_z = (max_z - global_min_z) / (global_max_z - global_min_z + 1e-6)
-
-    # Convert np.float32 back to standard Python floats for clean dictionary output
-    return {
-        "min": [float(norm_min_x), float(norm_min_y), float(norm_min_z)],
-        "max": [float(norm_max_x), float(norm_max_y), float(norm_max_z)]
-    }
-
-def save_pointcloud(
-    rgb: np.ndarray,            # (Hc, Wc, 3)
-    depth: np.ndarray,          # (Hd, Wd)
-    fx: float, fy: float, cx: float, cy: float,
-    out_path: str = "cloud.ply",
-    depth_min: float = 0.1,
-    depth_max: float = 50.0,
-    stride: int = 4,
-    resize_depth_to_rgb: bool = True,
-    apply_open3d_flip: bool = True,
-) -> None:
-    Hc, Wc = rgb.shape[:2]
-    Hd, Wd = depth.shape[:2]
-
-    if resize_depth_to_rgb and (Hd != Hc or Wd != Wc):
-        # Nearest keeps depth edges sharper; linear is smoother. Try nearest first.
-        depth = cv2.resize(depth, (Wc, Hc), interpolation=cv2.INTER_NEAREST)
-
-    # Now proceed (memory-safe subsample)
-    H, W = depth.shape
-    u = np.arange(0, W, stride)
-    v = np.arange(0, H, stride)
-    uu, vv = np.meshgrid(u, v)
-
-    z = depth[vv, uu].astype(np.float32)
-    valid = (z > depth_min) & (z < depth_max) & np.isfinite(z)
-
-    x = (uu - cx) * z / fx
-    y = (vv - cy) * z / fy
-
-    points = np.stack((x, y, z), axis=-1)[valid]
-    colors = (rgb[vv, uu][valid].astype(np.float32) / 255.0)
-
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(points.astype(np.float64))
-    pcd.colors = o3d.utility.Vector3dVector(colors.astype(np.float64))
-
-    if apply_open3d_flip:
-      pcd.transform([[1, 0, 0, 0],
-                    [0, -1, 0, 0],
-                    [0, 0, -1, 0],
-                    [0, 0, 0, 1]])
-
-    o3d.io.write_point_cloud(out_path, pcd, write_ascii=False)
-    print(f"Saved {len(points):,} points to {out_path}")
+    return bb_dict, changed_pcd
