@@ -1,60 +1,46 @@
 import cv2
 import numpy as np
-from correspondence import ImageMatcher
+from editing.bbox.correspondence import ImageMatcher
 
 
 def estimate_homography(
         pts_render,
         pts_flux,
         confidence=None,
-        confidence_threshold=0.5,
+        confidence_threshold=0.4,
         ransac_threshold=5.0
 ):
     """
     Estimate mapping:
-
         Flux image
               |
               v
         Render image
-
-
     pts_render:
         coordinates in rendered mesh image
-
     pts_flux:
         coordinates in Flux image
     """
-
-
     # ---------------------------------------------
     # confidence filtering
     # ---------------------------------------------
-
     if confidence is not None:
-
         mask = confidence > confidence_threshold
-
         pts_render = pts_render[mask]
         pts_flux = pts_flux[mask]
-
 
     print(
         "Using matches:",
         len(pts_render)
     )
 
-
     if len(pts_render) < 4:
         raise RuntimeError(
             "Not enough matches for homography"
         )
-
-
     # ---------------------------------------------
     # Homography
     # ---------------------------------------------
-
     H, inliers = cv2.findHomography(
         pts_flux,
         pts_render,
@@ -62,12 +48,10 @@ def estimate_homography(
         ransacReprojThreshold=ransac_threshold
     )
 
-
     if H is None:
         raise RuntimeError(
             "Homography estimation failed"
         )
-
 
     print(
         "Homography inliers:",
@@ -76,10 +60,7 @@ def estimate_homography(
         len(inliers)
     )
 
-
     return H, inliers
-
-
 
 def warp_difference(
         difference,
@@ -89,13 +70,9 @@ def warp_difference(
     """
     Warp difference image from Flux space
     into render space.
-
-
     output_size:
         (width,height)
     """
-
-
     aligned = cv2.warpPerspective(
         difference,
         H,
@@ -103,16 +80,12 @@ def warp_difference(
         flags=cv2.INTER_LINEAR
     )
 
-
     return aligned
-
-
 
 def save_debug(
         image,
         path
 ):
-
     cv2.imwrite(
         path,
         cv2.cvtColor(
@@ -121,28 +94,21 @@ def save_debug(
         )
     )
 
-
-
 if __name__ == "__main__":
-
-
     # ---------------------------------------------
     # Example standalone test
     # ---------------------------------------------
-
-
     render = cv2.imread(
-        "render_from_mesh.png"
+        "editing/state/render_from_mesh.png"
     )
 
     flux = cv2.imread(
-        "flux_img.png"
+        "editing/state/gen_img_1.png"
     )
 
     diff = cv2.imread(
-        "changed_part.png"
+        "editing/state/changed_part.png"
     )
-
 
     render = cv2.cvtColor(
         render,
@@ -159,22 +125,18 @@ if __name__ == "__main__":
         cv2.COLOR_BGR2RGB
     )
 
-
     matcher = ImageMatcher()
-
 
     pts_render, pts_flux, conf = matcher.match(
         render,
         flux
     )
 
-
     H, inliers = estimate_homography(
         pts_render,
         pts_flux,
         conf
     )
-
 
     aligned = warp_difference(
         diff,
@@ -185,12 +147,10 @@ if __name__ == "__main__":
         )
     )
 
-
     save_debug(
         aligned,
-        "aligned_difference.png"
+        "editing/state/aligned_difference.png"
     )
-
 
     print(
         "Saved aligned_difference.png"

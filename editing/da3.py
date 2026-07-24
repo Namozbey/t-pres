@@ -10,8 +10,8 @@ class DA3:
         # model = DepthAnything3.from_pretrained("depth-anything/DA3MONO-LARGE")
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        model = DepthAnything3.from_pretrained("depth-anything/DA3NESTED-GIANT-LARGE-1.1")
-        # model = DepthAnything3.from_pretrained("depth-anything/DA3METRIC-LARGE")
+        # model = DepthAnything3.from_pretrained("depth-anything/DA3NESTED-GIANT-LARGE-1.1")
+        model = DepthAnything3.from_pretrained("depth-anything/DA3-BASE")
         model = model.to(device)
         model.eval()
         print(f"Model loaded on {device}")

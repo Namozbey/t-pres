@@ -185,8 +185,8 @@ def visualize_matches(
 if __name__ == "__main__":
 
 
-    render_path = "render_from_mesh.png"
-    flux_path = "flux_img.png"
+    render_path = "editing/state/render_from_mesh.png"
+    flux_path = "editing/state/gen_img_1.png"
 
 
     # -------------------------------------------------
@@ -288,7 +288,7 @@ if __name__ == "__main__":
         pts0,
         pts1,
         conf,
-        "matches.png",
+        "editing/state/matches.png",
         max_matches=200
     )
 

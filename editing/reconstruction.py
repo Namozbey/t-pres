@@ -12,6 +12,67 @@ import copy
 # ==========================================================
 gpu_session = new_session(providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
 
+def get_trellis_bb(trellis_mesh_path, transformed_bb_dict):
+    """
+    Takes a bounding box (already transformed into Trellis physical space) and 
+    normalizes it relative to the Trellis generated mesh to map perfectly onto 
+    the [0, 1] KV cache latent grid.
+    """
+    # 1. Load the Trellis generated mesh
+    # (Using read_triangle_mesh since Trellis outputs a full surface, not just points)
+    trellis_mesh = o3d.io.read_triangle_mesh(trellis_mesh_path)
+    
+    if len(trellis_mesh.vertices) == 0:
+        raise ValueError(f"Could not load vertices from mesh at {trellis_mesh_path}")
+
+    # 2. Get the absolute bounds of the Trellis Mesh
+    mesh_min = np.array(trellis_mesh.get_min_bound())
+    mesh_max = np.array(trellis_mesh.get_max_bound())
+    
+    # 3. Get the absolute bounds of your aligned BB
+    part_min = np.array(transformed_bb_dict["min"])
+    part_max = np.array(transformed_bb_dict["max"])
+    
+    # 4. Normalize the Part BB relative to the Trellis Mesh [0.0 to 1.0]
+    range_xyz = mesh_max - mesh_min
+    range_xyz[range_xyz == 0] = 1e-6  # Prevent division by zero
+    
+    norm_min = (part_min - mesh_min) / range_xyz
+    norm_max = (part_max - mesh_min) / range_xyz
+
+    # NOTE: deliberately NOT clipped to [0, 1]. Values outside that range mean
+    # the edited region extends beyond the original mesh AABB (e.g. a new
+    # object placed on top of a table). The voxel containment test handles
+    # out-of-range bounds correctly; clipping here would delete exactly the
+    # region where new geometry has to be born.
+
+    # norm_min = np.clip(norm_min, 0.0, 1.0)
+    # norm_max = np.clip(norm_max, 0.0, 1.0)
+    
+    # 5. Map physical space -> Trellis Latent Space [z, y, x]
+    # Assuming Trellis physical is standard [X: Right, Y: Up, Z: Forward]
+    # And Trellis latent is [0]: Z(Up), [1]: Y(Depth), [2]: X(Right)
+    trellis_min = [
+        norm_min[1],  # Latent Z (Up)
+        1.0 - norm_min[2],  # Latent Y (Depth)
+        norm_min[0]   # Latent X (Right)
+    ]
+    
+    trellis_max = [
+        norm_max[1],  
+        1.0 - norm_max[2],  
+        norm_max[0]   
+    ]
+    
+    # 6. Safety check: ensure min is always less than max
+    final_min = [float(min(a, b)) for a, b in zip(trellis_min, trellis_max)]
+    final_max = [float(max(a, b)) for a, b in zip(trellis_min, trellis_max)]
+    
+    return {
+        "min": final_min,
+        "max": final_max
+    }
+
 def get_trellis_latent_mask(transformed_bb_dict, trellis_bounds=(-0.5, 0.5)):
     """
     Takes a bounding box (already transformed into Trellis physical space) and 
@@ -182,38 +243,29 @@ def generate_pcd(rgb_image, depth_map, mask, fx, fy, cx, cy):
     
     # Clean and orient
     if len(pcd.points) > 0:
-        pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=0.5)
+        pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=2.5)
         pcd.transform([[1,  0,  0, 0],
                        [0, -1,  0, 0],
                        [0,  0, -1, 0],
                        [0,  0,  0, 1]])
     return pcd
 
-def extract_changes(sk1_path, sk2_path, rgb_path, depth_map, fx, fy, cx, cy, padding=3):
+def process_2d_changes(sk1_path, sk2_path, rgb_image, save_dir, padding=3):
     """
-    Compares two sketches to find the precise contour of the changed region, 
-    extracts that exact blob from both the 2D image and the 3D point cloud, 
-    saves the assets, and returns the 3D Bounding Box of the changed part.
+    Compares two sketches to find the changed region, extracts the base object via AI,
+    saves the 2D assets, and returns the exact and base masks.
     """
-    # ==========================================
-    # 0. Load Main RGB Image & Setup Directories
-    # ==========================================
-    original_image = cv2.imread(rgb_path)
-    if original_image is None:
-        raise FileNotFoundError(f"Could not load image at path: {rgb_path}")
-        
-    rgb_image = cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB)
+    if isinstance(rgb_image, str):
+        rgb_image = cv2.imread(rgb_image)
+        rgb_image = cv2.cvtColor(rgb_image, cv2.COLOR_BGR2RGB)
+    h, w = rgb_image.shape[:2]
     
-    save_dir = "editing/output"
-    os.makedirs(save_dir, exist_ok=True)
-
     # ==========================================
     # 1. Robustly Find Sketch Differences
     # ==========================================
     sk1 = cv2.imread(sk1_path, cv2.IMREAD_GRAYSCALE)
     sk2 = cv2.imread(sk2_path, cv2.IMREAD_GRAYSCALE)
     
-    h, w = rgb_image.shape[:2]
     sk1 = cv2.resize(sk1, (w, h))
     sk2 = cv2.resize(sk2, (w, h))
 
@@ -226,33 +278,35 @@ def extract_changes(sk1_path, sk2_path, rgb_path, depth_map, fx, fy, cx, cy, pad
     kernel = np.ones((5, 5), np.uint8)
     diff_clean = cv2.morphologyEx(diff_thresh, cv2.MORPH_OPEN, kernel)
     
-    # Check if we actually found any differences before proceeding
     if np.sum(diff_clean) == 0:
         print("No significant differences found between the sketches!")
-        return {"min": [], "max": []}, None
+        return None, None
 
     # ==========================================
-    # 2. NEW: Create Precise Filled Contour Mask
+    # 2. Create Precise Filled Contour Mask
     # ==========================================
-    # Find the outer boundaries of the sketch differences
-    contours, _ = cv2.findContours(diff_clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    bridge_radius = 20
+    bridge_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (bridge_radius * 2 + 1, bridge_radius * 2 + 1))
+    dilated_edges = cv2.dilate(diff_clean, bridge_kernel)
+
+    contours, _ = cv2.findContours(dilated_edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
-    # Create an empty mask and fill the contours to make a solid 2D blob
-    exact_mask_uint8 = np.zeros((h, w), dtype=np.uint8)
-    cv2.drawContours(exact_mask_uint8, contours, -1, 255, thickness=cv2.FILLED)
+    filled_bloated_mask = np.zeros((h, w), dtype=np.uint8)
+    cv2.drawContours(filled_bloated_mask, contours, -1, 255, thickness=cv2.FILLED)
 
-    # Dilate the solid blob by the `padding` amount (using a circle for smooth edges)
+    exact_mask_uint8 = cv2.erode(filled_bloated_mask, bridge_kernel)
+
     if padding > 0:
         pad_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (padding * 2 + 1, padding * 2 + 1))
         exact_mask_uint8 = cv2.dilate(exact_mask_uint8, pad_kernel, iterations=1)
 
-    # Convert back to a boolean mask for array slicing
     exact_mask = exact_mask_uint8 > 0
 
     # ==========================================
     # 3. Extract Base Object via AI
     # ==========================================
     img_pil = Image.fromarray(rgb_image)
+    # Note: Assumes `remove` and `gpu_session` are available in the global scope
     rgba_output = remove(img_pil, session=gpu_session)
     rgba_array = np.array(rgba_output)
     
@@ -264,11 +318,40 @@ def extract_changes(sk1_path, sk2_path, rgb_path, depth_map, fx, fy, cx, cy, pad
     rgba_output.save(os.path.join(save_dir, "bg_free_full.png"))
 
     changed_rgba = rgba_array.copy()
-    changed_rgba[~exact_mask, 3] = 0  # Apply the precise blob mask!
+    changed_rgba[~exact_mask, :] = 0  # Apply the precise blob mask!
     Image.fromarray(changed_rgba).save(os.path.join(save_dir, "changed_part.png"))
 
+    return exact_mask, base_mask
+
+def extract_changes(sk1_path, sk2_path, rgb_path, depth_map, fx, fy, cx, cy, padding=3):
+    """
+    Orchestrates the pipeline to find the precise contour of the changed region, 
+    extracts that exact blob from both the 2D image and the 3D point cloud, 
+    saves the assets, and returns the 3D Bounding Box of the changed part.
+    """
     # ==========================================
-    # 5. Generate & Save Point Clouds
+    # 0. Load Main RGB Image & Setup Directories
+    # ==========================================
+    original_image = cv2.imread(rgb_path)
+    if original_image is None:
+        raise FileNotFoundError(f"Could not load image at path: {rgb_path}")
+        
+    rgb_image = cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB)
+    
+    save_dir = "editing/state"
+    os.makedirs(save_dir, exist_ok=True)
+
+    # ==========================================
+    # 1. Process 2D Changes (Using Helper)
+    # ==========================================
+    exact_mask, base_mask = process_2d_changes(sk1_path, sk2_path, rgb_image, save_dir, padding)
+    
+    # Check if differences were actually found
+    if exact_mask is None:
+        return {"min": [], "max": []}, None
+
+    # ==========================================
+    # 2. Generate & Save Point Clouds
     # ==========================================
     full_pcd = generate_pcd(rgb_image, depth_map, base_mask, fx, fy, cx, cy)
     o3d.io.write_point_cloud(os.path.join(save_dir, "bg_free_full_pc.ply"), full_pcd, write_ascii=False)
@@ -278,7 +361,7 @@ def extract_changes(sk1_path, sk2_path, rgb_path, depth_map, fx, fy, cx, cy, pad
     o3d.io.write_point_cloud(os.path.join(save_dir, "changed_part_pc.ply"), changed_pcd, write_ascii=False)
 
     # ==========================================
-    # 6. Calculate and Return Oriented Bounding Box
+    # 3. Calculate and Return Oriented Bounding Box
     # ==========================================
     if len(changed_pcd.points) == 0:
         print("Warning: The bounding box contained no 3D points.")
