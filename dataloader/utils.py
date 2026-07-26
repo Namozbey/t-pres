@@ -74,8 +74,9 @@ def generate_sketch_pairs(glb_path, num_views=3):
     renderer = pyrender.OffscreenRenderer(518, 518)
     
     # Orbit parameters
-    azimuths = np.linspace(np.pi / 9, 2 * np.pi + np.pi / 9, num_views, endpoint=False)
-    elevations = np.linspace(-np.pi / 5, -np.pi / 18, num_views, endpoint=False) # -np.pi / 8  # Camera looking slightly down
+    # azimuths = np.linspace(np.pi / 9, 2 * np.pi + np.pi / 9, num_views, endpoint=False)
+    azimuths = np.linspace(np.pi/2 + np.pi/6, 3*np.pi/2, num_views, endpoint=False)
+    elevations = np.linspace(-np.pi / 6, -np.pi / 10, num_views, endpoint=False) # -np.pi / 18, -np.pi / 8  # Camera looking slightly down
     radius = 2.0           # Distance from the chair
 
     rgb_images = []
@@ -101,6 +102,9 @@ def generate_sketch_pairs(glb_path, num_views=3):
         
         # Apply Canny Edge Detection (You can tune the 50, 150 thresholds later!)
         edges = cv2.Canny(gray, 50, 150)
+        kernel = np.ones((3, 3), np.uint8)
+
+        edges = cv2.dilate(edges, kernel, iterations=1)
         
         # Invert colors: Make background white and edges black (looks more like a human sketch)
         sketch = cv2.bitwise_not(edges)
