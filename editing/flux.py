@@ -3,6 +3,9 @@ import torch
 import torch.nn.functional as F
 from PIL import Image
 from diffusers import Flux2KleinPipeline
+from rembg import remove, new_session
+
+gpu_session = new_session(providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
 
 # =====================================================================
 # PYTORCH BACKWARD COMPATIBILITY HACK
@@ -84,6 +87,7 @@ class Flux2Wrapper():
         self,
         request: Flux2DevRequest,
         progress_callback=None,
+        clear_bg=True
     ):
         image = request.image
         generator = self._create_generator(request.generator_seed)
@@ -99,5 +103,8 @@ class Flux2Wrapper():
             callback_on_step_end=progress_callback,
         )
         res_images += result.images
+        if clear_bg:
+            for i, img in enumerate(res_images):
+                res_images[i] = remove(img, session=gpu_session)
 
         return res_images
