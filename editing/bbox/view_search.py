@@ -5,8 +5,8 @@ import cv2
 import numpy as np
 import torch
 
-from render import render_single_view_for_bbox
-from correspondence import ImageMatcher, visualize_matches
+from editing.bbox.render import render_single_view_for_bbox
+from editing.bbox.correspondence import ImageMatcher, visualize_matches
 
 
 # ============================================================
@@ -18,7 +18,7 @@ HEIGHT = 518
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-OUTPUT_DIR = "view_search_results"
+OUTPUT_DIR = "editing/state"
 
 # LoFTR filtering
 CONFIDENCE_THRESHOLD = 0.5
@@ -382,9 +382,9 @@ def search_best_view(
             (
                 render,
                 depth,
-                K,
-                R,
-                t,
+                camera_pose,
+                scale,
+                center
             ) = render_single_view_for_bbox(
                 mesh_path,
                 fx, fy, cx, cy,
@@ -415,9 +415,9 @@ def search_best_view(
             result["render"] = render
             result["depth"] = depth
 
-            result["K"] = K
-            result["R"] = R
-            result["t"] = t
+            result["camera_pose"] = camera_pose
+            result["scale"] = scale
+            result["center"] = center
 
             all_results.append(
                 result
@@ -810,7 +810,7 @@ def find_best_angles(mesh_path, flux_path, fx, fy, cx, cy):
 
     final_render_path = os.path.join(
         OUTPUT_DIR,
-        "best_view_render.png"
+        "render_from_mesh.png"
     )
 
     save_rgb_image(
@@ -970,12 +970,18 @@ def find_best_angles(mesh_path, flux_path, fx, fy, cx, cy):
     )
 
     return (
-        np.radians(fine_best['azimuth']),
-        np.radians(fine_best['elevation'])
+        fine_best['H'],
+        fine_best['camera_pose'],
+        fine_best['depth'],
+        fine_best['center'],
+        fine_best['scale']
     )
 
 
-if __name__ == "__main__":
-    az, el = find_best_angles("mesh_umbr.glb", "gen_img_1.png",1209.865588803089, 1195.9805743243244, 256.0, 256.0)
-    print(az)
-    print(el)
+# if __name__ == "__main__":
+#     H, camera_pose, depth_map, center,scale = find_best_angles("mesh_umbr.glb", "gen_img_1.png",1209.865588803089, 1195.9805743243244, 256.0, 256.0)
+#     print(H)
+#     print(camera_pose)
+#     print(depth_map)
+#     print(center)
+#     print(scale)

@@ -117,35 +117,17 @@ def run_pipeline(new_sketch_path, prompt, seed=123):
         da3.unload()
 
         process_2d_changes(prev_sketch, new_sketch_path, prev_img, save_dir="editing/state")
-        target_az, target_el = find_best_angles(prev_mesh, prev_img, fx, fy, cx, cy)
-
-        target_az = -np.pi/8 #3.0 #0.53
-        target_el = -np.pi / 7.5       
-        img1, depth_map, camera_pose, scale, center = render_single_view_for_bbox(prev_mesh, fx, fy, cx, cy, target_az, target_el, radius=3)
-
-        rendered_img_path = "editing/state/render_from_mesh.png"
-        cv2.imwrite(rendered_img_path, cv2.cvtColor(img1, cv2.COLOR_RGB2BGR))
+        H, camera_pose, depth_map, center,scale = find_best_angles(prev_mesh, prev_img, fx, fy, cx, cy)
 
         M = get_cam_to_mesh_matrix(camera_pose, scale, center)
 
         rendered_img = cv2.imread("editing/state/render_from_mesh.png")
         rendered_img = cv2.cvtColor(rendered_img,cv2.COLOR_BGR2RGB )
 
-        gen_img = cv2.imread(meta_state["prev_img"])
-        gen_img = cv2.cvtColor(gen_img, cv2.COLOR_BGR2RGB)
-
         diff_img = cv2.imread("editing/state/changed_part.png")
         diff_img = cv2.cvtColor(diff_img, cv2.COLOR_BGR2RGB)
 
-        matcher = ImageMatcher()
 
-        pts_render, pts_flux, conf = matcher.match(rendered_img, gen_img)
-
-        H, inliers = estimate_homography(
-            pts_render,
-            pts_flux,
-            conf
-        )
         aligned = warp_difference(
             diff_img,
             H,
