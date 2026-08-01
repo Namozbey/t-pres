@@ -21,6 +21,7 @@ from editing.trellis_editor import TrellisEditor
 from editing.bbox.correspondence import ImageMatcher
 from editing.bbox.render import render_single_view_for_bbox, get_cam_to_mesh_matrix
 from editing.bbox.warp import estimate_homography, warp_difference, save_debug
+from editing.bbox.view_search import find_best_angles
 from editing.reconstruction import (
     transform_bounding_box, 
     get_trellis_latent_mask,
@@ -116,6 +117,7 @@ def run_pipeline(new_sketch_path, prompt, seed=123):
         da3.unload()
 
         process_2d_changes(prev_sketch, new_sketch_path, prev_img, save_dir="editing/state")
+        target_az, target_el = find_best_angles(prev_mesh, prev_img, fx, fy, cx, cy)
 
         target_az = -np.pi/8 #3.0 #0.53
         target_el = -np.pi / 7.5       

@@ -18,9 +18,6 @@ HEIGHT = 518
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-MESH_PATH = "cha.glb"
-FLUX_PATH = "gen_img_1.png"
-
 OUTPUT_DIR = "view_search_results"
 
 # LoFTR filtering
@@ -327,6 +324,7 @@ def save_rgb_image(
 def search_best_view(
         mesh_path,
         flux_image,
+        fx, fy, cx, cy,
         matcher,
         azimuths,
         elevations,
@@ -358,12 +356,12 @@ def search_best_view(
 
             counter += 1
 
-            print()
-            print(
-                f"[{counter}/{total}] "
-                f"azimuth={azimuth:.1f}° "
-                f"elevation={elevation:.1f}°"
-            )
+            # print()
+            # print(
+            #     f"[{counter}/{total}] "
+            #     f"azimuth={azimuth:.1f}° "
+            #     f"elevation={elevation:.1f}°"
+            # )
 
             # ------------------------------------------------
             # Convert degrees -> radians
@@ -387,10 +385,9 @@ def search_best_view(
                 K,
                 R,
                 t,
-                scale,
-                center
             ) = render_single_view_for_bbox(
                 mesh_path,
+                fx, fy, cx, cy,
                 azimuth=azimuth_rad,
                 elevation=elevation_rad
             )
@@ -422,9 +419,6 @@ def search_best_view(
             result["R"] = R
             result["t"] = t
 
-            result["scale"] = scale
-            result["center"] = center
-
             all_results.append(
                 result
             )
@@ -433,40 +427,40 @@ def search_best_view(
             # Print result
             # ------------------------------------------------
 
-            print(
-                f"    matches       : "
-                f"{result['matches']}"
-            )
+            # print(
+            #     f"    matches       : "
+            #     f"{result['matches']}"
+            # )
 
-            print(
-                f"    RANSAC inliers: "
-                f"{result['inliers']}"
-            )
+            # print(
+            #     f"    RANSAC inliers: "
+            #     f"{result['inliers']}"
+            # )
 
-            print(
-                f"    confidence    : "
-                f"{result['mean_confidence']:.4f}"
-            )
+            # print(
+            #     f"    confidence    : "
+            #     f"{result['mean_confidence']:.4f}"
+            # )
 
-            if np.isfinite(
-                result["median_error"]
-            ):
+            # if np.isfinite(
+            #     result["median_error"]
+            # ):
 
-                print(
-                    f"    median error  : "
-                    f"{result['median_error']:.3f}px"
-                )
+            #     print(
+            #         f"    median error  : "
+            #         f"{result['median_error']:.3f}px"
+            #     )
 
-            else:
+            # else:
 
-                print(
-                    "    median error  : inf"
-                )
+            #     print(
+            #         "    median error  : inf"
+            #     )
 
-            print(
-                f"    SCORE         : "
-                f"{result['score']:.4f}"
-            )
+            # print(
+            #     f"    SCORE         : "
+            #     f"{result['score']:.4f}"
+            # )
 
             # ------------------------------------------------
             # Keep best
@@ -482,10 +476,10 @@ def search_best_view(
 
                 best_result = result
 
-                print()
-                print(
-                    "    *** NEW BEST VIEW ***"
-                )
+                # print()
+                # print(
+                #     "    *** NEW BEST VIEW ***"
+                # )
 
     return (
         best_result,
@@ -601,10 +595,10 @@ def save_results_table(
 
 
 # ============================================================
-# Main
+# The end2end method
 # ============================================================
 
-if __name__ == "__main__":
+def find_best_angles(mesh_path, flux_path, fx, fy, cx, cy):
 
     ensure_output_dir()
 
@@ -613,19 +607,19 @@ if __name__ == "__main__":
     # --------------------------------------------------------
 
     if not os.path.exists(
-        MESH_PATH
+        mesh_path
     ):
 
         raise FileNotFoundError(
-            f"Mesh not found: {MESH_PATH}"
+            f"Mesh not found: {mesh_path}"
         )
 
     if not os.path.exists(
-        FLUX_PATH
+        flux_path
     ):
 
         raise FileNotFoundError(
-            f"Flux image not found: {FLUX_PATH}"
+            f"Flux image not found: {flux_path}"
         )
 
     # --------------------------------------------------------
@@ -637,7 +631,7 @@ if __name__ == "__main__":
     )
 
     flux = load_image(
-        FLUX_PATH
+        flux_path
     )
 
     print(
@@ -665,6 +659,8 @@ if __name__ == "__main__":
     # ========================================================
     # COARSE SEARCH
     # ========================================================
+    print()
+    print("Coarse research starting...")
 
     coarse_azimuths = np.arange(
         0,
@@ -678,8 +674,9 @@ if __name__ == "__main__":
 
     coarse_best, coarse_results = (
         search_best_view(
-            mesh_path=MESH_PATH,
+            mesh_path=mesh_path,
             flux_image=flux,
+            fx=fx, fy=fy, cx=cx, cy=cy,
             matcher=matcher,
             azimuths=coarse_azimuths,
             elevations=coarse_elevations,
@@ -697,78 +694,44 @@ if __name__ == "__main__":
     # --------------------------------------------------------
 
     print()
-    print("=" * 70)
-    print("COARSE SEARCH RESULT")
-    print("=" * 70)
-
-    print(
-        f"Azimuth   : "
-        f"{coarse_best['azimuth']:.2f}°"
-    )
-
-    print(
-        f"Elevation : "
-        f"{coarse_best['elevation']:.2f}°"
-    )
-
-    print(
-        f"Score     : "
-        f"{coarse_best['score']:.4f}"
-    )
-
-    print(
-        f"Matches   : "
-        f"{coarse_best['matches']}"
-    )
-
-    print(
-        f"Inliers   : "
-        f"{coarse_best['inliers']}"
-    )
-
-    print(
-        f"Confidence: "
-        f"{coarse_best['mean_confidence']:.4f}"
-    )
-
-    print(
-        f"Error     : "
-        f"{coarse_best['median_error']:.3f}px"
-    )
+    print("Coarse research finished!")
 
     # --------------------------------------------------------
     # Save coarse winner
     # --------------------------------------------------------
 
-    save_rgb_image(
-        coarse_best["render"],
-        os.path.join(
-            OUTPUT_DIR,
-            "coarse_best_render.png"
-        )
-    )
+    # save_rgb_image(
+    #     coarse_best["render"],
+    #     os.path.join(
+    #         OUTPUT_DIR,
+    #         "coarse_best_render.png"
+    #     )
+    # )
 
-    save_best_matches(
-        coarse_best["render"],
-        flux,
-        coarse_best,
-        os.path.join(
-            OUTPUT_DIR,
-            "coarse_best_matches.png"
-        )
-    )
+    # save_best_matches(
+    #     coarse_best["render"],
+    #     flux,
+    #     coarse_best,
+    #     os.path.join(
+    #         OUTPUT_DIR,
+    #         "coarse_best_matches.png"
+    #     )
+    # )
 
-    save_results_table(
-        coarse_results,
-        os.path.join(
-            OUTPUT_DIR,
-            "coarse_results.csv"
-        )
-    )
+    # save_results_table(
+    #     coarse_results,
+    #     os.path.join(
+    #         OUTPUT_DIR,
+    #         "coarse_results.csv"
+    #     )
+    # )
 
     # ========================================================
     # FINE SEARCH
     # ========================================================
+
+    print()
+    print("Fine research starting...")
 
     (
         fine_azimuths,
@@ -779,8 +742,9 @@ if __name__ == "__main__":
 
     fine_best, fine_results = (
         search_best_view(
-            mesh_path=MESH_PATH,
+            mesh_path=mesh_path,
             flux_image=flux,
+            fx=fx, fy=fy, cx=cx, cy=cy,
             matcher=matcher,
             azimuths=fine_azimuths,
             elevations=fine_elevations,
@@ -793,53 +757,56 @@ if __name__ == "__main__":
             "Fine search failed."
         )
 
+    print()
+    print("Fine research finished!")
+
     # ========================================================
     # FINAL RESULT
     # ========================================================
 
-    print()
-    print("=" * 70)
-    print("FINAL BEST VIEW")
-    print("=" * 70)
+    # print()
+    # print("=" * 70)
+    # print("FINAL BEST VIEW")
+    # print("=" * 70)
 
-    print(
-        f"Azimuth   : "
-        f"{fine_best['azimuth']:.2f}°"
-    )
+    # print(
+    #     f"Azimuth   : "
+    #     f"{fine_best['azimuth']:.2f}°"
+    # )
 
-    print(
-        f"Elevation : "
-        f"{fine_best['elevation']:.2f}°"
-    )
+    # print(
+    #     f"Elevation : "
+    #     f"{fine_best['elevation']:.2f}°"
+    # )
 
-    print(
-        f"Score     : "
-        f"{fine_best['score']:.4f}"
-    )
+    # print(
+    #     f"Score     : "
+    #     f"{fine_best['score']:.4f}"
+    # )
 
-    print(
-        f"Matches   : "
-        f"{fine_best['matches']}"
-    )
+    # print(
+    #     f"Matches   : "
+    #     f"{fine_best['matches']}"
+    # )
 
-    print(
-        f"Inliers   : "
-        f"{fine_best['inliers']}"
-    )
+    # print(
+    #     f"Inliers   : "
+    #     f"{fine_best['inliers']}"
+    # )
 
-    print(
-        f"Confidence: "
-        f"{fine_best['mean_confidence']:.4f}"
-    )
+    # print(
+    #     f"Confidence: "
+    #     f"{fine_best['mean_confidence']:.4f}"
+    # )
 
-    print(
-        f"Error     : "
-        f"{fine_best['median_error']:.3f}px"
-    )
+    # print(
+    #     f"Error     : "
+    #     f"{fine_best['median_error']:.3f}px"
+    # )
 
-    # --------------------------------------------------------
-    # Save final render
-    # --------------------------------------------------------
+    # # --------------------------------------------------------
+    # # Save final render
+    # # --------------------------------------------------------
 
     final_render_path = os.path.join(
         OUTPUT_DIR,
@@ -851,9 +818,9 @@ if __name__ == "__main__":
         final_render_path
     )
 
-    # --------------------------------------------------------
-    # Save final correspondence
-    # --------------------------------------------------------
+    # # --------------------------------------------------------
+    # # Save final correspondence
+    # # --------------------------------------------------------
 
     final_matches_path = os.path.join(
         OUTPUT_DIR,
@@ -867,17 +834,17 @@ if __name__ == "__main__":
         final_matches_path
     )
 
-    # --------------------------------------------------------
-    # Save final results table
-    # --------------------------------------------------------
+    # # --------------------------------------------------------
+    # # Save final results table
+    # # --------------------------------------------------------
 
-    save_results_table(
-        fine_results,
-        os.path.join(
-            OUTPUT_DIR,
-            "fine_results.csv"
-        )
-    )
+    # save_results_table(
+    #     fine_results,
+    #     os.path.join(
+    #         OUTPUT_DIR,
+    #         "fine_results.csv"
+    #     )
+    # )
 
     # --------------------------------------------------------
     # Save final homography
@@ -897,60 +864,60 @@ if __name__ == "__main__":
     # Save camera parameters
     # --------------------------------------------------------
 
-    camera_info_path = os.path.join(
-        OUTPUT_DIR,
-        "best_camera.txt"
-    )
+    # camera_info_path = os.path.join(
+    #     OUTPUT_DIR,
+    #     "best_camera.txt"
+    # )
 
-    with open(
-        camera_info_path,
-        "w"
-    ) as f:
+    # with open(
+    #     camera_info_path,
+    #     "w"
+    # ) as f:
 
-        f.write(
-            f"azimuth_degrees="
-            f"{fine_best['azimuth']}\n"
-        )
+    #     f.write(
+    #         f"azimuth_degrees="
+    #         f"{fine_best['azimuth']}\n"
+    #     )
 
-        f.write(
-            f"elevation_degrees="
-            f"{fine_best['elevation']}\n"
-        )
+    #     f.write(
+    #         f"elevation_degrees="
+    #         f"{fine_best['elevation']}\n"
+    #     )
 
-        f.write(
-            f"azimuth_radians="
-            f"{fine_best['azimuth_rad']}\n"
-        )
+    #     f.write(
+    #         f"azimuth_radians="
+    #         f"{fine_best['azimuth_rad']}\n"
+    #     )
 
-        f.write(
-            f"elevation_radians="
-            f"{fine_best['elevation_rad']}\n"
-        )
+    #     f.write(
+    #         f"elevation_radians="
+    #         f"{fine_best['elevation_rad']}\n"
+    #     )
 
-        f.write(
-            f"score="
-            f"{fine_best['score']}\n"
-        )
+    #     f.write(
+    #         f"score="
+    #         f"{fine_best['score']}\n"
+    #     )
 
-        f.write(
-            f"matches="
-            f"{fine_best['matches']}\n"
-        )
+    #     f.write(
+    #         f"matches="
+    #         f"{fine_best['matches']}\n"
+    #     )
 
-        f.write(
-            f"inliers="
-            f"{fine_best['inliers']}\n"
-        )
+    #     f.write(
+    #         f"inliers="
+    #         f"{fine_best['inliers']}\n"
+    #     )
 
-        f.write(
-            f"mean_confidence="
-            f"{fine_best['mean_confidence']}\n"
-        )
+    #     f.write(
+    #         f"mean_confidence="
+    #         f"{fine_best['mean_confidence']}\n"
+    #     )
 
-        f.write(
-            f"median_error="
-            f"{fine_best['median_error']}\n"
-        )
+    #     f.write(
+    #         f"median_error="
+    #         f"{fine_best['median_error']}\n"
+    #     )
 
     # ========================================================
     # Finished
@@ -978,14 +945,14 @@ if __name__ == "__main__":
         final_matches_path
     )
 
-    print()
-    print(
-        "Best camera:"
-    )
+    # print()
+    # print(
+    #     "Best camera:"
+    # )
 
-    print(
-        camera_info_path
-    )
+    # print(
+    #     camera_info_path
+    # )
 
     print()
     print(
@@ -1001,3 +968,14 @@ if __name__ == "__main__":
         f"  elevation = "
         f"{fine_best['elevation']:.2f}°"
     )
+
+    return (
+        np.radians(fine_best['azimuth']),
+        np.radians(fine_best['elevation'])
+    )
+
+
+if __name__ == "__main__":
+    az, el = find_best_angles("mesh_umbr.glb", "gen_img_1.png",1209.865588803089, 1195.9805743243244, 256.0, 256.0)
+    print(az)
+    print(el)
