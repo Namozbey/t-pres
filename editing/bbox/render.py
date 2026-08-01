@@ -60,7 +60,7 @@ def render_single_view_for_bbox(
     R_c2w = camera_pose[:3, :3]
     t_c2w = camera_pose[:3, 3]
     
-    light = pyrender.DirectionalLight(color=np.ones(3), intensity=4.0)
+    light = pyrender.DirectionalLight(color=np.ones(3), intensity=6.0)
     scene.add(camera, pose=camera_pose)
     scene.add(light, pose=camera_pose)
     

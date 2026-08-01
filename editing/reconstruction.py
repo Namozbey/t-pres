@@ -2,15 +2,15 @@ import os
 import cv2
 import numpy as np
 import open3d as o3d
-from rembg import remove, new_session
+# from rembg import remove, new_session
 from PIL import Image
-import itertools
+# import itertools
 import copy
 
 # ==========================================================
 # Initialize the AI session once globally to force GPU usage
 # ==========================================================
-gpu_session = new_session(providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
+# gpu_session = new_session(providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
 
 def get_trellis_bb(trellis_mesh_path, transformed_bb_dict):
     """
@@ -243,7 +243,7 @@ def generate_pcd(rgb_image, depth_map, mask, fx, fy, cx, cy):
     
     # Clean and orient
     if len(pcd.points) > 0:
-        pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=2.5)
+        pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=3.0)
         pcd.transform([[1,  0,  0, 0],
                        [0, -1,  0, 0],
                        [0,  0, -1, 0],
@@ -257,7 +257,7 @@ def process_2d_changes(sk1_path, sk2_path, rgb_image, save_dir, padding=3):
     """
     if isinstance(rgb_image, str):
         rgb_image = cv2.imread(rgb_image)
-        rgb_image = cv2.cvtColor(rgb_image, cv2.COLOR_BGR2RGB)
+        rgb_image = cv2.cvtColor(rgb_image, cv2.COLOR_BGRA2RGBA)
     h, w = rgb_image.shape[:2]
     
     # ==========================================
@@ -305,17 +305,18 @@ def process_2d_changes(sk1_path, sk2_path, rgb_image, save_dir, padding=3):
     # ==========================================
     # 3. Extract Base Object via AI
     # ==========================================
-    img_pil = Image.fromarray(rgb_image)
-    # Note: Assumes `remove` and `gpu_session` are available in the global scope
-    rgba_output = remove(img_pil, session=gpu_session)
-    rgba_array = np.array(rgba_output)
+    # img_pil = Image.fromarray(rgb_image)
+    # # Note: Assumes `remove` and `gpu_session` are available in the global scope
+    # rgba_output = remove(img_pil, session=gpu_session)
+    # rgba_array = np.array(rgba_output)
+    rgba_array = rgb_image
     
     base_mask = rgba_array[:, :, 3] > 128
 
     # ==========================================
     # 4. Save the 2D Images using Precise Mask
     # ==========================================
-    rgba_output.save(os.path.join(save_dir, "bg_free_full.png"))
+    # rgba_output.save(os.path.join(save_dir, "bg_free_full.png"))
 
     changed_rgba = rgba_array.copy()
     changed_rgba[~exact_mask, :] = 0  # Apply the precise blob mask!

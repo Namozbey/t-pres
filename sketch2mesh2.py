@@ -96,6 +96,10 @@ def run_pipeline(new_sketch_path, prompt, seed=123):
     # PHASE 2: Spatial Math & Masking (DA3 & OpenCV)
     # ==========================================
     trellis_mask = None
+    # {
+    #     "min": [0.5, 0.0, 0.0],
+    #     "max": [1.0, 1.0, 1.0]
+    # }
     
     if is_edit_mode:
         print("\n--- PHASE 2: Calculating Spatial Edit Mask ---")
@@ -113,9 +117,9 @@ def run_pipeline(new_sketch_path, prompt, seed=123):
 
         process_2d_changes(prev_sketch, new_sketch_path, prev_img, save_dir="editing/state")
 
-        target_az = -np.pi / 0.55 #3.0 #0.53
-        target_el = -np.pi / 10.5       
-        img1, depth_map, camera_pose, scale, center = render_single_view_for_bbox(prev_mesh, fx, fy, cx, cy, target_az, target_el, radius=5)
+        target_az = -np.pi/8 #3.0 #0.53
+        target_el = -np.pi / 7.5       
+        img1, depth_map, camera_pose, scale, center = render_single_view_for_bbox(prev_mesh, fx, fy, cx, cy, target_az, target_el, radius=3)
 
         rendered_img_path = "editing/state/render_from_mesh.png"
         cv2.imwrite(rendered_img_path, cv2.cvtColor(img1, cv2.COLOR_RGB2BGR))
@@ -161,7 +165,7 @@ def run_pipeline(new_sketch_path, prompt, seed=123):
         else:
             # 4. Transform to Trellis space
             print("Transforming physical bounds to Trellis Space...")
-            transformed_bb = transform_bounding_box(changed_pcd, M, padding=0.02)
+            transformed_bb = transform_bounding_box(changed_pcd, M, padding=0.04)
 
             sample_mesh_surface(prev_mesh)
             visualize_bounding_box("editing/output/generated.ply", transformed_bb)
@@ -170,6 +174,11 @@ def run_pipeline(new_sketch_path, prompt, seed=123):
             # trellis_mask = get_trellis_latent_mask(transformed_bb)
             trellis_mask = get_trellis_bb(prev_mesh, transformed_bb)
             print(f"Computed KV Cache Mask: {trellis_mask}")
+            with open('editing/state/bb.json', 'w') as fp:
+                json.dump({
+                    "transformed_bb": transformed_bb,
+                    "trellis_mask": trellis_mask
+                }, fp)
 
     # ==========================================
     # PHASE 3: Generate 3D Mesh (Trellis)
@@ -189,10 +198,6 @@ def run_pipeline(new_sketch_path, prompt, seed=123):
         )
     else:
         print("Mode: EDIT BLENDING")
-        # trellis_mask = {
-        #     "min": [0.0, 0.0, 0.0],
-        #     "max": [1.0, 0.5, 1.0]
-        # }
         editor.process(
             image_path=current_img_path,
             out_glb_path=current_mesh_path,
@@ -210,6 +215,7 @@ def run_pipeline(new_sketch_path, prompt, seed=123):
     # ==========================================
     # PHASE 4: Update State for Next Run
     # ==========================================
+    # if is_edit_mode:
     save_meta_state(
         sketch_path=new_sketch_path,
         img_path=current_img_path,
@@ -233,12 +239,37 @@ if __name__ == "__main__":
         required=True, 
         help="Path to the new sketch image file."
     )
+
+    default_prompt = """
+Convert this hand-drawn sketch into a realistic 3D object.
+
+The input sketch defines ONLY the silhouette and viewpoint.
+Preserve the exact outline, proportions, composition, camera angle, and perspective.
+
+Infer realistic three-dimensional geometry from the sketch.
+Give every object natural thickness, rounded surfaces, smooth transitions, and physically plausible volume.
+Interpret the drawing as a fully modeled 3D object rather than black outlines.
+
+Apply high-quality PBR materials with realistic texture, subtle surface imperfections, and natural specular reflections.
+Use professional product-render lighting to emphasize the 3D form while keeping the lighting soft and even.
+
+The final image should look like a high-end CGI render or CAD visualization rather than a line drawing.
+
+Background: pure white (#FFFFFF).
+No cast shadows.
+No floor.
+No ambient occlusion on the background.
+Object centered and isolated.
+
+Do not change the object's silhouette, viewpoint, proportions, or composition.
+Only infer realistic geometry, materials, depth, and surface details from the sketch.
+"""
     
     # Optional prompt (defaults to your cherry prompt, but easily changeable)
     parser.add_argument(
         "-p", "--prompt", 
         type=str, 
-        default="turn it to real image, keeping background white", 
+        default=default_prompt, #"turn it to real image, keeping background white", 
         help="Text prompt for the 2D generation model."
     )
     
