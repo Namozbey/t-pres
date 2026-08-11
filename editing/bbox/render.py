@@ -13,7 +13,7 @@ def render_single_view_for_bbox(
     fx, fy, cx, cy,  # Explicit intrinsics in pixels
     azimuth=np.pi/4, 
     elevation=-np.pi/4, 
-    radius=3.5
+    radius=3.0
 ):
     scene_mesh = trimesh.load(glb_path, force='mesh')
     
