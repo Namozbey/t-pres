@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import json
 from tqdm import tqdm
 import numpy as np
 import torch
@@ -171,7 +172,7 @@ def chamfer(mesh1, mesh2, n=10000):
 # RENDERING
 # ============================================================
 
-def get_renderer(image_size=256):
+def get_renderer(image_size=518):
 
     cameras = FoVPerspectiveCameras(device=device)
 
@@ -285,31 +286,37 @@ def evaluate(data_root,
     real_dir = Path(real_dir)
     fake_dir = Path(fake_dir)
 
-    (real_dir / "image").mkdir(parents=True, exist_ok=True)
     (real_dir / "sketch").mkdir(parents=True, exist_ok=True)
-    (fake_dir / "image").mkdir(parents=True, exist_ok=True)
     (fake_dir / "sketch").mkdir(parents=True, exist_ok=True)
+
+    split_info = {}
+    split_path = "data/eval/split.json"
+    with open(split_path, "r") as f:
+        split_info = json.load(f)
 
     gt_cache = {}
 
-    cd_img, cd_sketch = [], []
-    clip_img, clip_sketch = [], []
+    cd_sketch = []
+    clip_sketch = []
 
     for category_dir in sorted(data_root.iterdir()):
 
-        if not category_dir.is_dir():
+        if not category_dir.is_dir() or category_dir.name != "eval":
             continue
 
         mesh_dir = category_dir / "meshes"
-        img_dir = category_dir / "images"
         sketch_dir = category_dir / "sketches"
-
-        gen_img_dir = category_dir / "gen_image"
-        gen_sketch_dir = category_dir / "gen_sketch"
+        gen_sketch_dir = category_dir / "gen_meshes"
 
         for gt_path in tqdm(list(mesh_dir.glob("*.glb")), desc=category_dir.name):
-
+            
             obj_id = gt_path.stem
+
+            if obj_id not in split_info.keys():
+                # print(obj_id)
+                continue
+            else:
+                mesh_view_id = split_info[obj_id]["test"][0]
 
             if obj_id not in gt_cache:
                 gt_mesh = load_mesh(str(gt_path))
@@ -319,29 +326,8 @@ def evaluate(data_root,
 
             gt_render = gt_cache[obj_id]
 
-            # ================= IMAGE =================
-            for pred_path in gen_img_dir.glob(f"{obj_id}_*.glb"):
-
-                pred_mesh = load_mesh(str(pred_path))
-                R, T, _ = align_meshes(pred_mesh, gt_mesh)
-                pred_mesh = apply_alignment(pred_mesh, R, T)
-
-                cd_img.append(chamfer(gt_mesh, pred_mesh))
-
-                pred_render = render_mesh_views(pred_mesh)
-
-                view_id = pred_path.stem.split("_")[-1]
-                sketch = list(img_dir.glob(f"{obj_id}_{view_id}.png"))
-
-                if sketch:
-                    clip_img.append(clip_similarity(Image.open(sketch[0]), pred_render))
-
-                save_images(gt_render, real_dir / "image", f"{obj_id}_{view_id}")
-                save_images(pred_render, fake_dir / "image", f"{obj_id}_{view_id}")
-
             # ================= SKETCH =================
-            for pred_path in gen_sketch_dir.glob(f"{obj_id}_*.glb"):
-
+            for pred_path in gen_sketch_dir.glob(f"{obj_id}_{mesh_view_id}.glb"):
                 pred_mesh = load_mesh(str(pred_path))
                 R, T, _ = align_meshes(pred_mesh, gt_mesh)
                 pred_mesh = apply_alignment(pred_mesh, R, T)
@@ -359,22 +345,14 @@ def evaluate(data_root,
                 save_images(gt_render, real_dir / "sketch", f"{obj_id}_{view_id}")
                 save_images(pred_render, fake_dir / "sketch", f"{obj_id}_{view_id}")
 
-    fid_img = compute_fid(real_dir / "image", fake_dir / "image")
     fid_sketch = compute_fid(real_dir / "sketch", fake_dir / "sketch")
 
     print("\n===== RESULTS =====")
-    print("IMG CD:", np.mean(cd_img) if cd_img else 0)
-    print("IMG CLIP:", np.mean(clip_img) if clip_img else 0)
-    print("IMG FID:", fid_img)
-
     print("SKETCH CD:", np.mean(cd_sketch) if cd_sketch else 0)
     print("SKETCH CLIP:", np.mean(clip_sketch) if clip_sketch else 0)
     print("SKETCH FID:", fid_sketch)
 
     return {
-        "img_CD": float(np.mean(cd_img)) if cd_img else 0,
-        "img_CLIP": float(np.mean(clip_img)) if clip_img else 0,
-        "img_FID": fid_img,
         "sketch_CD": float(np.mean(cd_sketch)) if cd_sketch else 0,
         "sketch_CLIP": float(np.mean(clip_sketch)) if clip_sketch else 0,
         "sketch_FID": fid_sketch,

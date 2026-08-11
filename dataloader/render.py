@@ -1,5 +1,6 @@
 import argparse
 from dataloader.utils import save_sketches, setup_dataset
+from config import TRAINING_CONFIG
 
 def main():
     # 1. Initialize the argument parser
@@ -9,7 +10,7 @@ def main():
     parser.add_argument(
         '--category', 
         type=str, 
-        default='chair',
+        default=TRAINING_CONFIG["category"],
         help='The Objaverse/LVIS category to process (default: chair)'
     )
     parser.add_argument(
@@ -21,7 +22,7 @@ def main():
     parser.add_argument(
         '--num_views', 
         type=int, 
-        default=6,
+        default=5,
         help='Number of camera views to render per mesh (default: 6)'
     )
 
@@ -39,7 +40,7 @@ def main():
     # 4. Execute the pipeline
     try:
         print("\n[1/2] Setting up dataset...")
-        setup_dataset(download_limit=args.download_limit, category=args.category)
+        # setup_dataset(download_limit=args.download_limit, category=args.category)
         
         print("\n[2/2] Generating and saving sketches...")
         save_sketches(num_views=args.num_views, category=args.category)

@@ -58,7 +58,7 @@ class SketchMeshDataset(Dataset):
             uid, view_id = filename.split('_')
             view_id = int(view_id)
 
-            if view_id not in self.split_info[uid][self.split]:
+            if uid not in self.split_info.keys() or view_id not in self.split_info[uid][self.split]:
                 continue
 
             sketch_path = os.path.join(self.sketch_dir, f"{filename}.png")
@@ -91,15 +91,15 @@ class SketchMeshDataset(Dataset):
     def __getitem__(self, idx):
         item = self.data_pairs[idx]
         
-        # 1. Load Images
+        # Load Images
         img = Image.open(item["image_path"]).convert('RGB')
         sketch = Image.open(item["sketch_path"]).convert('RGB')
         
         if self.transform:
             img_tensor = self.transform(img)
             sketch_tensor = self.transform(sketch)
-            
-        # 2. Load Latents
+
+        # Load Latents
         latent_data = np.load(item["latent_path"])
         ss_latent_data = np.load(item["ss_latent_path"])
         
@@ -114,7 +114,7 @@ class SketchMeshDataset(Dataset):
         cond_tokens = cond_data["cond"].float().squeeze(0).squeeze(0)
         neg_cond_tokens = cond_data["neg_cond"].float().squeeze(0).squeeze(0)
 
-        return {
+        data = {
             ## Tensors
             "image": img_tensor,
             "sketch": sketch_tensor,
@@ -131,3 +131,51 @@ class SketchMeshDataset(Dataset):
             "image_path": item["image_path"],
             "sketch_path": item["sketch_path"]
         }
+
+        return data
+
+    def sparse_collate_fn(self, batch):
+        """
+        Custom collate function to handle variable-length sparse 3D latents,
+        while preserving all 2D images and string paths.
+        """
+        # 1. Stack the standard fixed-size tensors (Images and Sketches)
+        batched_data = {
+            "uid": [item["uid"] for item in batch],
+            "view_id": [item["view_id"] for item in batch],
+            "image_path": [item["image_path"] for item in batch],
+            "sketch_path": [item["sketch_path"] for item in batch],
+            "mesh_path": [item["mesh_path"] for item in batch],
+            # Stack 2D tensors into [B, C, H, W]
+            "image": torch.stack([item["image"] for item in batch]),
+            "sketch": torch.stack([item["sketch"] for item in batch]),
+        }
+
+        batched_data.update({
+            "ss_latent": torch.stack([item["ss_latent"] for item in batch]),
+            "cond_tokens": torch.stack([item["cond_tokens"] for item in batch]),
+            "neg_cond_tokens": torch.stack([item["neg_cond_tokens"] for item in batch])
+        })
+    
+        batched_feats = []
+        batched_coords = []
+    
+        # 2. Process the variable-length 3D sparse tensors
+        for batch_idx, item in enumerate(batch):
+            feats = item["latent_feats"]
+            coords = item["latent_coords"]
+            
+            # Create a column of the current batch index: [N, 1]
+            batch_idx_col = torch.full((coords.shape[0], 1), batch_idx, dtype=torch.int32)
+            
+            # Append the batch index to the coordinates: [N, 4] -> (batch_idx, x, y, z)
+            coords_with_batch = torch.cat([batch_idx_col, coords], dim=1)
+            
+            batched_feats.append(feats)
+            batched_coords.append(coords_with_batch)
+            
+        # Concatenate all sparse points into single massive lists
+        batched_data["latent_feats"] = torch.cat(batched_feats, dim=0)
+        batched_data["latent_coords"] = torch.cat(batched_coords, dim=0)
+        
+        return batched_data
