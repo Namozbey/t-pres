@@ -1,0 +1,33 @@
+# --- Model Dependencies ---
+diffusers
+transformers
+accelerate
+safetensors
+huggingface-hub
+timm
+einops
+sentencepiece
+
+# --- 3D Processing Stack ---
+spconv-cu118
+trimesh
+xatlas
+pyrender
+utils3d
+plyfile
+imageio
+imageio-ffmpeg
+
+# --- Utilities & UI ---
+gradio
+addict
+certifi
+
+# --- Stability Pins ---
+numpy<2.0.0
+moviepy<2.0.0
+opencv-python<4.11.0
+opencv-python-headless<4.11.0
+rembg<2.0.60
+pillow<11.0
+jupyter-client<8

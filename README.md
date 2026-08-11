@@ -1,298 +1,94 @@
-# Cloning the Repository
+# Topology-Preserving Sketch-Based Generation of 3D Assets
+
+<div align="center">
+  <video src="assets/demo.mp4" width="100%" controls>
+    Your browser does not support the video tag.
+  </video>
+</div>
+
+## Motivation
+
+Current 3D generation approaches often struggle to balance diversity with structural consistency. Existing models either lack diversity when the topology is well-preserved, or they lose topological stability over multiple iterations when diversity is high.
+
+This limitation motivates our primary research question:
+
+> _"Can we generate highly diverse and high-fidelity meshes through diffusion models, and edit parts while preserving the topology of the unedited part?"_
+
+To address this, we leverage existing diffusion-based generation models (FLUX.2 and TRELLIS) to achieve high diversity and propose a novel **attention-caching and masking mechanism** (KV-Cache Engine and Automatic Bounding Box extraction) for the latent space to ensure topological stability during local sketch-based edits.
+
+## Qualitative Results
+
+Our method is capable of generating meshes that closely resemble ground-truth shapes. It accurately interprets user edits in specific regions (such as replacements or removals) while preserving the unedited parts of the original geometry.
+
+![Qualitative Results](assets/results.png)
+
+---
+
+## Setup & Installation
 
 Clone the repository
 
 ```bash
+git clone --recurse-submodules https://github.com/Namozbey/t-pres.git
+cd t-pres
+```
 
-git clone git@gitlab.lrz.de:sketch2mesh_gen/sketch2mesh.git
+Due to the complex interactions between 3D generation (Trellis), Image Generation (Flux.2), and Depth Estimation (Depth Anything 3), strict environment management is required to prevent CUDA and PyTorch conflicts.
+
+**1. Create the environment:**
+
+```bash
+conda create -n t_pres python=3.11
+conda activate t_pres
+```
+
+**2. Install PyTorch:**
+
+```bash
+pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url [https://download.pytorch.org/whl/cu118](https://download.pytorch.org/whl/cu118)
 
 ```
 
-Clone the submodules
+**3. Install Flash Attention (Crucial for Trellis):**
+
+- **Linux:** `pip install flash-attn --no-build-isolation`
+- **Windows:** You must use a pre-compiled wheel matching PyTorch 2.4.0, CUDA 11.8, and Python 3.11 to avoid build errors.
 
 ```bash
-
-git submodule update --init --recursive
+pip install [https://github.com/bdashore3/flash-attention/releases/download/v2.6.3/flash_attn-2.6.3+cu118torch2.4cxx11abiFALSE-cp311-cp311-win_amd64.whl](https://github.com/bdashore3/flash-attention/releases/download/v2.6.3/flash_attn-2.6.3+cu118torch2.4cxx11abiFALSE-cp311-cp311-win_amd64.whl)
 
 ```
 
-# 🖼️ Sketch-to-3D Dataset Generation Pipeline
-
-This repository contains an automated, end-to-end pipeline for generating paired `{sketch, image, 3D mesh}` datasets. It leverages the **Objaverse** dataset for high-quality ground-truth 3D topologies, utilizes **Open3D** for headless multi-view rendering, and extracts stylized wireframes via **OpenCV**.
-
-It includes a fully integrated **PyTorch DataLoader** optimized for training generative models (e.g., Diffusion models, Autoregressive Transformers).
-
----
-
-## ⚙️ 1. Installation
-
-Clone the repository and install the required dependencies. It is recommended to use a virtual environment (e.g., `conda` or `venv`).
+**4. Install Windows 3D Rendering Libraries:**
 
 ```bash
+pip install kaolin==0.18.0 -f [https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.4.0_cu118.html](https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.4.0_cu118.html)
+pip install nvdiffrast==0.4.0
 
-# Install dependencies
+```
+
+**5. Install Project Dependencies:**
+
+```bash
 pip install -r requirements.txt
 
 ```
 
-_(Note: PyTorch and Torchvision are included in the requirements, but for optimal GPU performance, install them directly via the [official PyTorch instructions](https://pytorch.org/get-started/locally/) based on your specific CUDA version)._
-
----
-
-## 🚀 2. Data Generation
-
-The data generation pipeline handles downloading categorized 3D `.glb` files, normalizing the geometry, and rendering multi-view RGB images and Canny edge sketches.
-
-<!-- ### Option A: Command Line Interface (CLI) -->
-
-You can run the full pipeline directly from the terminal using `render.py`.
-
- <!-- This is highly recommended for batch processing. -->
+**6. Install Depth Anything V3:**
 
 ```bash
-# Basic usage with default parameters (Chairs)
-python -m dataloader.render
-
-# Custom dataset generation (e.g., generating 6 views for 100 chair)
-python -m dataloader.render --category chair --download_limit 100 --num_views 6
-
-```
-
-<!-- ### Option B: Python API
-
-You can also import and trigger the pipeline programmatically within your own scripts or Jupyter Notebooks:
-
-```python
-from utils import setup_dataset, save_sketches
-
-# 1. Download base 3D meshes
-setup_dataset(download_limit=3, category="chair")
-
-# 2. Render RGB images and extract sketches
-save_sketches(num_views=6, category="chair")
-
-``` -->
-
-### 📂 Output Directory Structure
-
-Running the generation pipeline will automatically organize your data into the following structure:
-
-```text
-data/
-└── chair/
-    ├── meshes/        # Raw .glb 3D files (e.g., 8a4a3a90.glb)
-    ├── images/        # Rendered RGB views (e.g., 8a4a3a90_0.png)
-    └── sketches/      # Extracted edge sketches (e.g., 8a4a3a90_0.png)
+git clone [https://github.com/DepthAnything/Depth-Anything-V3.git](https://github.com/DepthAnything/Depth-Anything-V3.git)
+cd Depth-Anything-V3
+pip install -e . --no-deps
+cd ..
 
 ```
 
----
+## Usage
 
-## 🧠 3. PyTorch Integration (DataLoader)
-
-Once your data is generated, you can seamlessly stream it into your training loops using the included `SketchMeshDataset` class. It features lazy-loading to prevent out-of-memory errors and automatic sanity checks to ensure paired data integrity.
-
-```python
-from dataloader.dataset import SketchMeshDataset
-from torch.utils.data import DataLoader
-
-# 1. Initialize the Dataset
-dataset = SketchMeshDataset(
-    root_dir="data",
-    category="chair",
-    image_size=512
-)
-
-# 2. Initialize the DataLoader
-dataloader = DataLoader(
-    dataset,
-    batch_size=8,        # Number of images to process at once
-    shuffle=True,        # Randomize the order (crucial for training)
-    num_workers=4,       # Multi-processing for faster data loading
-    drop_last=True       # Drops the last incomplete batch
-)
-
-# 3. Training Loop Example
-for batch_idx, batch in enumerate(dataloader):
-    # Tensors formatted as [batch_size, channels, height, width]
-    images = batch['image']       # -> Shape: [8, 3, 512, 512]
-    sketches = batch['sketch']    # -> Shape: [8, 3, 512, 512]
-    print(f" - Images shape:  {batch['image'].shape}")   # Expected: [B, 3, 512, 512]
-    print(f" - Sketches shape:{batch['sketch'].shape}")  # Expected: [B, 3, 512, 512]
-    print(f" - latent_feats shape:{batch['latent_feats'].shape}")  # Expected: [tokens_length, 8]
-    print(f" - latent_coords shape:{batch['latent_coords'].shape}")  # Expected: [tokens_length, 4]
-    print(f" - ss_latents shape:{batch['ss_latent'].shape}")  # Expected: [B, 8, 16, 16, 16]
-
-    # Metadata for evaluation/tracking
-    uids = batch['uid']           # List of 3D object IDs
-    view_ids = batch['view_id']   # List of camera view IDs (e.g., '0, 1')
-    mesh_paths = batch['mesh_path'] # Paths to original .glb files
-    mesh_paths = batch['image_path'] # Paths to images .png files
-    mesh_paths = batch['sketch_path'] # Paths to sketches .png files
-
-    print(f"Processing Batch {batch_idx+1} | Tensors loaded to memory.")
-
-    # Pass to your model...
-```
-
----
-
-## 🛠️ Troubleshooting
-
-- **Missing Display / Headless Rendering Errors:** This pipeline uses Open3D for rendering, which operates natively on Windows without issue. If running on a headless Linux server (like AWS or Google Colab), ensure you have a virtual framebuffer installed (e.g., `xvfb`).
-
-# Offline latent encoding (VAE pre-encoding)
-
-Run:
+_(Coming soon)_
 
 ```bash
-python generate_slats.py --data_dir dataloader/data/chair
-```
-
-# Sketch/Image to 3D Evaluation Pipeline
-
-## 1. Overview
-
-This project evaluates 3D mesh generation quality from:
-
-- RGB images
-- sketches
-
-using:
-
-- **Chamfer Distance (CD)**
-- **CLIP Similarity**
-- **FID**
-
-The pipeline supports:
-
-- multiple object categories
-- multiple input views per object
-- automatic mesh alignment
-- rendered-view evaluation
-
----
-
-## 2.Dataset Structure
-
-Your dataset should follow this structure:
-
-```text
-data/
-├── category/
-│   ├── images/
-│   │   ├── objectid_0.png
-│   │   ├── objectid_1.png
-│   │   └── ...
-│   │
-│   ├── sketches/
-│   │   ├── objectid_0.png
-│   │   ├── objectid_1.png
-│   │   └── ...
-│   │
-│   ├── meshes/
-│   │   ├── objectid.glb
-│   │   └── ...
-│   │
-│   ├── gen_image/
-│   │   ├── objectid_0.glb
-│   │   ├── objectid_1.glb
-│   │   └── ...
-│   │
-│   ├── gen_sketch/
-│   │   ├── objectid_0.glb
-│   │   ├── objectid_1.glb
-│   │   └── ...
-│
-├── table/
-│   └── ...
-```
-
----
-
-## 3. Evaluation Metrics
-
-### Chamfer Distance (CD)
-
-Measures geometric similarity between:
-
-- predicted mesh
-- ground-truth mesh
-
-Procedure:
-
-1. sample surface points
-2. align using:
-   - global rotation search
-   - ICP refinement
-3. compute bidirectional Chamfer distance
-
-Lower is better.
-
----
-
-### CLIP Similarity
-
-Measures semantic consistency between:
-
-- input image/sketch
-- rendered predicted mesh views
-
-Procedure:
-
-1. render multiple views of predicted mesh
-2. encode with CLIP
-3. compare against input image/sketch embedding
-4. average top-5 similarities
-
-Higher is better.
-
----
-
-### FID
-
-Measures distribution similarity between:
-
-- rendered GT meshes
-- rendered predicted meshes
-
-Computed separately for:
-
-- image-conditioned generation
-- sketch-conditioned generation
-
-Lower is better.
-
----
-
-## 4. Environment Setup
-
-Before running generation or evaluation, set up the environment using:
-
-```bash
-bash setup_env.sh
-```
-
-## 5. Running Evaluation
-
-Run:
-
-```bash
-python -m dataloader.eval.py
-```
-
-Example output:
-
-```text
-========== FINAL RESULTS ==========
-
---- IMAGE CONDITION ---
-Chamfer: 0.0123
-CLIP: 0.812
-FID: 34.5
-
---- SKETCH CONDITION ---
-Chamfer: 0.0181
-CLIP: 0.744
-FID: 41.2
+# Example usage for sketch-to-mesh editing
+python sketch2mesh.py -s my_sketch.png -nc
 ```
