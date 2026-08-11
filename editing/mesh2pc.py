@@ -4,7 +4,7 @@ import open3d as o3d
 
 def sample_mesh_surface(
     mesh_path: str,
-    out_path: str = "editing/output/generated.ply", 
+    out_path: str = "state/generated.ply", 
     num_points: int = 100000):
     """
     Sample points uniformly from mesh surface and save as .ply.

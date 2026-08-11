@@ -339,7 +339,7 @@ def extract_changes(sk1_path, sk2_path, rgb_path, depth_map, fx, fy, cx, cy, pad
         
     rgb_image = cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB)
     
-    save_dir = "editing/state"
+    save_dir = "state"
     os.makedirs(save_dir, exist_ok=True)
 
     # ==========================================

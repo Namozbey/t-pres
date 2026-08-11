@@ -1,5 +1,4 @@
 import cv2
-import numpy as np
 from editing.bbox.correspondence import ImageMatcher
 
 
@@ -99,15 +98,15 @@ if __name__ == "__main__":
     # Example standalone test
     # ---------------------------------------------
     render = cv2.imread(
-        "editing/state/render_from_mesh.png"
+        "state/render_from_mesh.png"
     )
 
     flux = cv2.imread(
-        "editing/state/gen_img_1.png"
+        "state/gen_img_1.png"
     )
 
     diff = cv2.imread(
-        "editing/state/changed_part.png"
+        "state/changed_part.png"
     )
 
     render = cv2.cvtColor(
@@ -149,7 +148,7 @@ if __name__ == "__main__":
 
     save_debug(
         aligned,
-        "editing/state/aligned_difference.png"
+        "state/aligned_difference.png"
     )
 
     print(

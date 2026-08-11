@@ -98,7 +98,7 @@ def get_cam_to_mesh_matrix(camera_pose, scale, center):
     return M_final
 
 if __name__ == "__main__":
-    mesh_path = "editing/state/mesh_1.glb"
+    mesh_path = "state/mesh_1.glb"
 
     # Validate file presence before running
     if not os.path.exists(mesh_path):
@@ -113,9 +113,9 @@ if __name__ == "__main__":
     
     img1, depth_map, camera_pose, scale, center = render_single_view_for_bbox(mesh_path, fx, fy, cx, cy, target_az, target_el)
     print(depth_map[200, 200])
-    plt.imsave('editing/state/depth_image.png', depth_map, cmap='plasma')
+    plt.imsave('state/depth_image.png', depth_map, cmap='plasma')
 
     cv2.imwrite(
-        "editing/state/render_from_mesh.png",
+        "state/render_from_mesh.png",
         cv2.cvtColor(img1, cv2.COLOR_RGB2BGR)
     )

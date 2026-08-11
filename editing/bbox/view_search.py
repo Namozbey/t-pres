@@ -18,7 +18,7 @@ HEIGHT = 518
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-OUTPUT_DIR = "editing/state"
+OUTPUT_DIR = "state"
 
 # LoFTR filtering
 CONFIDENCE_THRESHOLD = 0.5

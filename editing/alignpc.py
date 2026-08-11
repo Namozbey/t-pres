@@ -37,7 +37,7 @@ def compute_scale_and_center(source, target):
 def align_pcs_sim3(
         source_ply: str,
         target_ply: str,
-        output_path="editing/output/aligned.ply"
+        output_path="state/aligned.ply"
 ):
 
     source = o3d.io.read_point_cloud(source_ply)
