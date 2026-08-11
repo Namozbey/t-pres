@@ -9,11 +9,9 @@
 </div>
 
 <br>
-<div align="center">
-  <video src="assets/demo.mp4" width="100%" controls>
-    Your browser does not support the video tag.
-  </video>
-</div>
+<p align="center">
+  <img src="assets/demo.gif" alt="Topology-Preserving Editing" width="100%">
+</p>
 
 ## Motivation
 
@@ -29,7 +27,9 @@ To address this, we leverage existing diffusion-based generation models (FLUX.2 
 
 Our method is capable of generating meshes that closely resemble ground-truth shapes. It accurately interprets user edits in specific regions (such as replacements or removals) while preserving the unedited parts of the original geometry.
 
-![Qualitative Results](assets/results.png)
+<p align="center">
+  <img src="assets/results.png" alt="Qualitative Results" width="80%">
+</p>
 
 ---
 

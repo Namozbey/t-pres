@@ -278,7 +278,7 @@ Only infer realistic geometry, materials, depth, and surface details from the sk
     parser.add_argument(
         "-p", "--prompt", 
         type=str, 
-        default=default_prompt,
+        default=default_prompt,  #"turn it to real image, keeping background white",
         help="Text prompt for the 2D generation model."
     )
     
