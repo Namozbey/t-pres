@@ -8,12 +8,42 @@ os.environ["SSL_CERT_FILE"] = certifi.where()
 
 import gc
 import cv2
+import sys
 import json
 import torch
 import argparse
 from PIL import Image
 import open3d as o3d
 import numpy as np
+
+# =====================================================================
+# PYTORCH 2.4.0 / DIFFUSERS 0.39.0 COMPATIBILITY PATCH
+# Automates the FlashAttention-3 bypass so users don't have to edit files.
+# =====================================================================
+if hasattr(torch, "library"):
+    # 1. Patch custom_op
+    if hasattr(torch.library, "custom_op"):
+        _orig_custom_op = torch.library.custom_op
+        def _safe_custom_op(*args, **kwargs):
+            if args and isinstance(args[0], str) and "_diffusers_flash_attn_3" in args[0]:
+                return lambda fn: fn
+            return _orig_custom_op(*args, **kwargs)
+        torch.library.custom_op = _safe_custom_op
+        
+    # 2. Patch register_fake
+    if hasattr(torch.library, "register_fake"):
+        _orig_register_fake = torch.library.register_fake
+        def _safe_register_fake(*args, **kwargs):
+            if args and isinstance(args[0], str) and "_diffusers_flash_attn_3" in args[0]:
+                return lambda fn: fn
+            return _orig_register_fake(*args, **kwargs)
+        torch.library.register_fake = _safe_register_fake
+
+# 3. Mock flex_attention (PyTorch 2.5 feature)
+if "torch.nn.attention.flex_attention" not in sys.modules:
+    mock_flex = MagicMock()
+    sys.modules["torch.nn.attention.flex_attention"] = mock_flex
+# =====================================================================
 
 # Import your wrappers and tools
 from editing.da3 import DA3
@@ -22,11 +52,13 @@ from editing.trellis_editor import TrellisEditor
 from editing.bbox.render import get_cam_to_mesh_matrix
 from editing.bbox.warp import warp_difference, save_debug
 from editing.bbox.view_search import find_best_angles
+# from editing.mesh2pc import sample_mesh_surface
 from editing.reconstruction import (
     transform_bounding_box, 
     get_trellis_bb,
     process_2d_changes,
     generate_pcd,
+    # visualize_bounding_box
 )
 
 STATE_DIR = "state"
@@ -142,8 +174,9 @@ def run_pipeline(new_sketch_path, prompt, seed=123, not_from_cache=False):
         else:
             # 4. Transform to Trellis space
             print("Transforming physical bounds to Trellis Space...")
-            transformed_bb = transform_bounding_box(changed_pcd, M, padding=0.04)
+            transformed_bb = transform_bounding_box(changed_pcd, M, padding=0.02)
 
+            # Uncomment if you wanna see the bounding-box for sanity-check
             # sample_mesh_surface(prev_mesh)
             # visualize_bounding_box("state/generated.ply", transformed_bb)
             

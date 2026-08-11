@@ -32,8 +32,7 @@ TRAINING_CONFIG = {
     "lora_alpha": 16,
     "lora_dropout": 0.05,
     "target_modules": "all-linear",
-    "model_backbone": "E:/Nov1/AI/TRELLIS/TRELLIS-image-large"
-    # "model_backbone": "microsoft/TRELLIS-image-large"
+    "model_backbone": "microsoft/TRELLIS-image-large" # Replace with your folder path
 }
 
 WANDB_CONFIG = {

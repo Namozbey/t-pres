@@ -1,5 +1,14 @@
-# Topology-Preserving Sketch-Based Generation of 3D Assets
+<div align="center">
+<h1 style="border-bottom: none; margin-bottom: 0px">Topology-Preserving Sketch-Based Generation of 3D Assets</h1>
 
+[**Selin Akmen**](https://www.linkedin.com/in/selin-akmen-7a825b24a/) · [**Namozjon Ostonaev**](https://www.linkedin.com/in/namoz-ostonaev/)
+
+<a href="docs/paper.pdf"><img src='https://img.shields.io/badge/Paper-PDF-red' alt='Paper PDF'></a>
+<a href='docs/poster.pdf'><img src='https://img.shields.io/badge/Poster-PDF-blue' alt='Poster PDF'></a>
+
+</div>
+
+<br>
 <div align="center">
   <video src="assets/demo.mp4" width="100%" controls>
     Your browser does not support the video tag.
@@ -42,46 +51,45 @@ conda create -n t_pres python=3.11
 conda activate t_pres
 ```
 
-**2. Install PyTorch:**
+**2. Install PyTorch & Core Attention (Xformers):**
 
 ```bash
-pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url [https://download.pytorch.org/whl/cu118](https://download.pytorch.org/whl/cu118)
-
+pip install torch==2.4.0 torchvision==0.19.0 torchaudio==2.4.0 --index-url https://download.pytorch.org/whl/cu118
+pip install xformers==0.0.27.post2 --index-url https://download.pytorch.org/whl/cu118
 ```
 
-**3. Install Flash Attention (Crucial for Trellis):**
-
-- **Linux:** `pip install flash-attn --no-build-isolation`
-- **Windows:** You must use a pre-compiled wheel matching PyTorch 2.4.0, CUDA 11.8, and Python 3.11 to avoid build errors.
-
-```bash
-pip install [https://github.com/bdashore3/flash-attention/releases/download/v2.6.3/flash_attn-2.6.3+cu118torch2.4cxx11abiFALSE-cp311-cp311-win_amd64.whl](https://github.com/bdashore3/flash-attention/releases/download/v2.6.3/flash_attn-2.6.3+cu118torch2.4cxx11abiFALSE-cp311-cp311-win_amd64.whl)
-
-```
-
-**4. Install Windows 3D Rendering Libraries:**
-
-```bash
-pip install kaolin==0.18.0 -f [https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.4.0_cu118.html](https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.4.0_cu118.html)
-pip install nvdiffrast==0.4.0
-
-```
-
-**5. Install Project Dependencies:**
+**3. Install Project Dependencies:**
 
 ```bash
 pip install -r requirements.txt
-
 ```
 
-**6. Install Depth Anything V3:**
+**4. Install 3D Rendering Libraries:**
 
 ```bash
-git clone [https://github.com/DepthAnything/Depth-Anything-V3.git](https://github.com/DepthAnything/Depth-Anything-V3.git)
+pip install kaolin==0.18.0 -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.4.0_cu118.html
+```
+
+_(Windows Users: Building `nvdiffrast` requires Visual Studio C++ Build Tools. To avoid `Ninja` parallel-build crashes and `NumPy` build errors, run these exact commands in your active Command Prompt to safely compile it):_
+
+```cmd
+call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" -vcvars_ver=14.29
+set DISTUTILS_USE_SDK=1
+set USE_NINJA=0
+
+pip install git+https://github.com/NVlabs/nvdiffrast.git --no-build-isolation
+pip install "git+https://github.com/autonomousvision/mip-splatting.git#subdirectory=submodules/diff-gaussian-rasterization" --no-build-isolation
+pip install git+https://github.com/nerfstudio-project/gsplat.git@0b4dddf04cb687367602c01196913cde6a743d70 --no-build-isolation
+```
+
+_(If you are using VS Community instead of BuildTools, adjust the path to `\2022\Community\...`)_
+
+**5. Install Depth Anything V3:**
+
+```bash
 cd Depth-Anything-V3
 pip install -e . --no-deps
 cd ..
-
 ```
 
 ## Usage
