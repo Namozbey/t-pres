@@ -15,6 +15,7 @@ import argparse
 from PIL import Image
 import open3d as o3d
 import numpy as np
+from unittest.mock import MagicMock
 
 # =====================================================================
 # PYTORCH 2.4.0 / DIFFUSERS 0.39.0 COMPATIBILITY PATCH
