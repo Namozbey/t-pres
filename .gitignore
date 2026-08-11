@@ -9,13 +9,12 @@ __pycache__/
 
 # Project data and generated files
 dataloader/data/
+dataloader/renders/
 state/
-*.glb
-*.ply
-*.png
 checkpoints
 diagnostic_visuals*
 diagnostic_outputs*
+view_search_results
 
 # wandb logs
 wandb

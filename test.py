@@ -1,19 +1,20 @@
 import os
+# Enables this your env has 'xformers' instead of 'flash-attn'
 os.environ['ATTN_BACKEND'] = 'xformers' 
 os.environ['SPCONV_ALGO'] = 'native'
 
 import argparse
 import torch
+from PIL import Image
 from torch.utils.data import DataLoader
 from peft import PeftModel
 
 # Import configurations and dataloader modules
 from config import TRAINING_CONFIG
-from dataloader.utils import sparse_collate_fn
 from dataloader.dataset import SketchMeshDataset
 
 # Import the pre-loaded pipeline and execution logic from sanity_check2
-from sanity_check2 import (
+from diagnosis.sanity_check import (
     base_pipeline,
     run_manual_inference_flow,
     export_assets,
@@ -47,15 +48,63 @@ def main():
         batch_size=TRAINING_CONFIG["batch_size"], 
         shuffle=False,       # Keep order deterministic for testing
         num_workers=TRAINING_CONFIG["num_workers"],
-        collate_fn=sparse_collate_fn,
+        collate_fn=dataset.sparse_collate_fn,
         drop_last=False      # Ensure we test every single image, don't drop remainders
     )
     
     print(f"Total test items: {len(dataset)}")
     print(f"Total batches: {len(dataloader)}")
 
+    # -----------------------------------------------------------------
+    # PASS 1: VANILLA & VANILLA + CUSTOM TOKENS
+    # -----------------------------------------------------------------
     print("\n====================================================")
-    print("INJECTING LORA INTO THE SYSTEM GRAPH")
+    print("PASS 1: STOCK VANILLA & CUSTOM TOKENS BASELINE")
+    print("====================================================")
+    reset_model_state(base_pipeline)
+    torch.cuda.empty_cache()
+
+    with torch.no_grad():
+        for batch_idx, batch in enumerate(dataloader):
+            print(f"\n--- Processing Vanilla Batch [{batch_idx + 1}/{len(dataloader)}] ---")
+            current_batch_size = batch['cond_tokens'].shape[0]
+            
+            for i in range(current_batch_size):
+                uid = batch["uid"][i]
+                sketch_path = batch["sketch_path"][i]
+                print(f"  -> Generating baseline meshes for UID: {uid}")
+                
+                run1_mesh_path = os.path.join(args.output_dir, f"mesh_pure_vanilla_{uid}.glb")
+                run2_mesh_path = os.path.join(args.output_dir, f"mesh_vanilla_plus_custom_tokens_{uid}.glb")
+                
+                # Extract the conditioning for THIS specific item and add the batch dimension [1, seq_len, dim]
+                cond_dict = {
+                    "cond": batch["cond_tokens"][i].unsqueeze(0).to(device),
+                    "neg_cond": batch["neg_cond_tokens"][i].unsqueeze(0).to(device)
+                }
+
+                # RUN 1: Pure Vanilla
+                if os.path.exists(run1_mesh_path):
+                    print(f"     [⏭️ SKIP] Found existing RUN 1 output at: {run1_mesh_path}")
+                else:
+                    print("     [1/3] Running Pure Stock Vanilla Pipeline...")
+                    sketch_image = Image.open(sketch_path).convert("RGB")
+                    vanilla_outputs = base_pipeline.run(sketch_image, seed=123)
+                    export_assets(vanilla_outputs, finename=f"pure_vanilla_{uid}", output_dir=args.output_dir)
+
+                # RUN 2: Vanilla + Custom Tokens
+                if os.path.exists(run2_mesh_path):
+                    print(f"     [⏭️ SKIP] Found existing RUN 2 output at: {run2_mesh_path}")
+                else:
+                    print("     [2/3] Running Stock Vanilla Model + Custom Tokens...")
+                    san_check_outputs = run_manual_inference_flow(base_pipeline, cond_dict)
+                    export_assets(san_check_outputs, finename=f"vanilla_plus_custom_tokens_{uid}", output_dir=args.output_dir)
+
+    # -----------------------------------------------------------------
+    # PASS 2: LORA INJECTION & FINE-TUNED GENERATION
+    # -----------------------------------------------------------------
+    print("\n====================================================")
+    print("PASS 2: INJECTING LORA INTO THE SYSTEM GRAPH")
     print("====================================================")
     reset_model_state(base_pipeline)
     torch.cuda.empty_cache()
@@ -70,38 +119,32 @@ def main():
             model.eval()
 
     print("\n====================================================")
-    print("STARTING BATCH INFERENCE LOOP")
+    print("STARTING FINE-TUNED BATCH INFERENCE LOOP")
     print("====================================================")
     
     with torch.no_grad():
         for batch_idx, batch in enumerate(dataloader):
-            print(f"\n--- Processing Batch [{batch_idx + 1}/{len(dataloader)}] ---")
-            
-            # The dataloader returns batches of N size. We iterate through them individually
-            # so `run_manual_inference_flow` safely runs 1 sample at a time without OOMing.
+            print(f"\n--- Processing LoRA Batch [{batch_idx + 1}/{len(dataloader)}] ---")
             current_batch_size = batch['cond_tokens'].shape[0]
             
             for i in range(current_batch_size):
                 uid = batch["uid"][i]
-                print(f"  -> Generating mesh for UID: {uid}")
+                print(f"  -> Generating fine-tuned mesh for UID: {uid}")
                 
-                # Pre-calculate the expected output path so we can skip it if it already exists
-                expected_mesh_path = os.path.join(args.output_dir, f"mesh_test_{uid}_e{epoch}.glb")
+                expected_mesh_path = os.path.join(args.output_dir, f"mesh_fine_tuned_slat_{uid}_e{epoch}.glb")
+                
                 if os.path.exists(expected_mesh_path):
-                    print(f"     [⏭️ SKIP] Found existing output at: {expected_mesh_path}")
+                    print(f"     [⏭️ SKIP] Found existing RUN 3 output at: {expected_mesh_path}")
                     continue
                 
-                # Extract the conditioning for THIS specific item and add the batch dimension [1, seq_len, dim]
                 cond_dict = {
                     "cond": batch["cond_tokens"][i].unsqueeze(0).to(device),
                     "neg_cond": batch["neg_cond_tokens"][i].unsqueeze(0).to(device)
                 }
                 
-                # Run the customized inference flow
+                print(f"     [3/3] Running Generation on Fine-Tuned System Stack (Epoch {epoch})...")
                 outputs = run_manual_inference_flow(base_pipeline, cond_dict)
-                
-                # Export the assets using the UID so you know exactly which sketch it came from
-                export_assets(outputs, finename=f"test_{uid}_e{epoch}", output_dir=args.output_dir)
+                export_assets(outputs, finename=f"fine_tuned_slat_{uid}_e{epoch}", output_dir=args.output_dir)
 
     print(f"\n[TESTING COMPLETE] All assets exported to: {args.output_dir}")
 

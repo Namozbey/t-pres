@@ -1,4 +1,5 @@
 import os
+# Enables this your env has 'xformers' instead of 'flash-attn'
 os.environ['ATTN_BACKEND'] = 'xformers' 
 os.environ['SPCONV_ALGO'] = 'native'
 

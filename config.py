@@ -32,17 +32,12 @@ TRAINING_CONFIG = {
     "lora_alpha": 16,
     "lora_dropout": 0.05,
     "target_modules": "all-linear",
-    # [
-    #     "to_q", "to_kv", "to_qkv", "to_out",  # Attention
-    #     "fc1", "fc2", "proj", "mlp.fc1", "mlp.fc2" # Feed-Forward / MLP
-    # ], 
-    # ["to_q", "to_kv", "to_qkv", "to_out"],
     "model_backbone": "E:/Nov1/AI/TRELLIS/TRELLIS-image-large"
     # "model_backbone": "microsoft/TRELLIS-image-large"
 }
 
 WANDB_CONFIG = {
     "project": "sketch2mesh",
-    "entity": "namoz-tum",     # Replace with your 2-person W&B team space name
+    "entity": "hello-tum",     # Replace with your W&B team space name
     "run_name": "lora-sparse-rectified-flow-run"
 }

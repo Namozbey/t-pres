@@ -1,5 +1,6 @@
 #fine_tune.py
 import os
+# Enables this your env has 'xformers' instead of 'flash-attn'
 os.environ['ATTN_BACKEND'] = 'xformers' 
 os.environ['SPCONV_ALGO'] = 'native'
 
@@ -12,7 +13,6 @@ import wandb
 
 from architecture import setup_trainable_structure_pipeline
 from dataloader.dataset import SketchMeshDataset
-from dataloader.utils import sparse_collate_fn
 from config import TRAINING_CONFIG, WANDB_CONFIG
 
 # =====================================================================
@@ -277,7 +277,7 @@ def main_train_pipeline():
         batch_size=TRAINING_CONFIG["batch_size"],
         shuffle=True,  
         num_workers=TRAINING_CONFIG["num_workers"],
-        collate_fn=sparse_collate_fn,
+        collate_fn=dataset.sparse_collate_fn,
         drop_last=True  
     )
 
@@ -293,7 +293,7 @@ def main_train_pipeline():
         batch_size=TRAINING_CONFIG["batch_size"],
         shuffle=False,
         num_workers=TRAINING_CONFIG["num_workers"],
-        collate_fn=sparse_collate_fn,
+        collate_fn=val_dataset.sparse_collate_fn,
         drop_last=True
     )
     
