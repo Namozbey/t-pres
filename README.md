@@ -135,3 +135,13 @@ If you need to verify the spatial math and want to see the 3D bounding box cover
 3. Uncomment the function calls `sample_mesh_surface(prev_mesh)` and `visualize_bounding_box(...)` on **lines 181 and 182**.
 
 This will pop up a 3D visualizer showing the mesh and the calculated bounding box area before the edit is applied.
+
+## Limitations
+
+<p align="center">
+  <img src="assets/comparison.png" alt="Qualitative Results" width="90%">
+</p>
+
+**Sketch-to-Image Limitations.** Since we utilize the image-to-image generative model FLUX.2, there are certain limitations on how the model interprets sketches as solid images. In the Figure, second row, the edited result was caused by FLUX.2, since it generated the chair image with a solid bottom half.
+
+**ABB Limitations.** Our ABB method has two main limitations. First, because it computes the bounding box (BB) from a 3D reconstruction of the changed part, it is inherently unable to capture regions behind rounded, spherical parts (the Figure, 1st row, our edited example). Second, the ABB mechanism utilizes the depth map from the initially generated mesh; thereby, it lacks depth information for the added part in the new sketch, making it unable to capture the addition's BB.
