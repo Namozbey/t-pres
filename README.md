@@ -94,9 +94,44 @@ cd ..
 
 ## Usage
 
-_(Coming soon)_
+The pipeline is stateful and automatically saves intermediate outputs, generated meshes, and model states in the `state/` directory. By default, consecutive runs will attempt to use this cache to edit the previous generation.
+
+### 1. Initial Generation
+
+To generate a 3D mesh from a sketch for the first time, simply provide the path to your sketch:
 
 ```bash
-# Example usage for sketch-to-mesh editing
-python sketch2mesh.py -s my_sketch.png -nc
+python sketch2mesh.py -s samples/truck_1.png
 ```
+
+### 2. Editing the Generation
+
+To edit the previously generated mesh, run the script again with the edited sketch. The pipeline will automatically detect the previous state in the `state/` folder, calculate the differences, and apply a localized edit:
+
+```bash
+python sketch2mesh.py -s samples/truck_2.png
+```
+
+### 3. Starting a New Generation
+
+If you want to start a completely new generation (clearing the previous cache), use the `--not-from-cache` or `-nc` flag:
+
+```bash
+python sketch2mesh.py -s samples/bottle_1.png -nc
+```
+
+Once the initial generation is complete, you can edit this new object normally without the flag:
+
+```bash
+python sketch2mesh.py -s samples/bottle_2.png
+```
+
+### 🐛 Debugging & Visualization
+
+If you need to verify the spatial math and want to see the 3D bounding box coverage of the edited region:
+
+1. Open `sketch2mesh.py`.
+2. Uncomment the imports on **lines 56 and 62**.
+3. Uncomment the function calls `sample_mesh_surface(prev_mesh)` and `visualize_bounding_box(...)` on **lines 181 and 182**.
+
+This will pop up a 3D visualizer showing the mesh and the calculated bounding box area before the edit is applied.
